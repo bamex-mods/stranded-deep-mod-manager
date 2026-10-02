@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/bamex-mods/stranded-deep-mod-manager/schemas/mod-page-v1.schema.json",
+  "title": "Stranded Deep Mod Page",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "defaultLocale",
+    "locales",
+    "media",
+    "tags",
+    "highlights"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "defaultLocale": {
+      "type": "string",
+      "minLength": 2
+    },
+    "locales": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^(?!/)(?!.*\\.\\.)(?![A-Za-z]+:).+$"
+      }
+    },
+    "media": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "icon": {
+          "type": "string",
+          "pattern": "^(?!/)(?!.*\\.\\.)(?![A-Za-z]+:).+$"
+        },
+        "cover": {
+          "type": "string",
+          "pattern": "^(?!/)(?!.*\\.\\.)(?![A-Za-z]+:).+$"
+        },
+        "screenshots": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "file"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]*$"
+              },
+              "file": {
+                "type": "string",
+                "pattern": "^(?!/)(?!.*\\.\\.)(?![A-Za-z]+:).+$"
+              }
+            }
+          }
+        }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9_]*$"
+      }
+    },
+    "highlights": {
+      "type": "array",
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9_]*$"
+      }
+    }
+  }
+}

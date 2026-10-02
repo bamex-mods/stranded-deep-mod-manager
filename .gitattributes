@@ -1,0 +1,11 @@
+*.cs -text
+*.ps1 -text
+*.json -text
+*.md -text
+.gitignore -text
+.gitattributes -text
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary

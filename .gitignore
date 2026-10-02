@@ -1,0 +1,10 @@
+/build/
+/release/
+/bin/
+/obj/
+.vs/
+*.user
+*.suo
+*.tmp
+*.bak
+*~
