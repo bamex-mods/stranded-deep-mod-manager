@@ -2,32 +2,118 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Windows.Forms;
+using StrandedDeepModManager.Assets;
 using StrandedDeepModManager.Content;
+using StrandedDeepModManager.UI;
 
 namespace StrandedDeepModManager
 {
-    public sealed class MainForm : Form
+    public sealed class MainForm : BorderlessForm
     {
-        private readonly TextBox _gameRoot = new TextBox();
-        private readonly Button _browseGame = new Button();
-        private readonly Button _detectGame = new Button();
-        private readonly Button _refresh = new Button();
-        private readonly Button _install = new Button();
-        private readonly Button _uninstall = new Button();
+        private enum ModFilter
+        {
+            All,
+            Installed,
+            Updates
+        }
 
-        private readonly ListView _list = new ListView();
-        private readonly TextBox _details = new TextBox();
-        private readonly Label _summary = new Label();
-        private readonly Label _catalogStatus = new Label();
-        private readonly ComboBox _language = new ComboBox();
-        private readonly BackgroundWorker _pageWorker = new BackgroundWorker();
+        private readonly BackgroundWorker _pageWorker =
+            new BackgroundWorker();
+
+        private readonly Panel _header =
+            new Panel();
+
+        private readonly Button _langRu =
+            new Button();
+
+        private readonly Button _langEn =
+            new Button();
+
+        private readonly Button _settings =
+            new Button();
+
+        private readonly Button _minimizeWindow =
+            new Button();
+
+        private readonly Button _maximizeWindow =
+            new Button();
+
+        private readonly Button _closeWindow =
+            new Button();
+
+        private readonly ToolTip _windowToolTip =
+            new ToolTip();
+
+        private readonly Button _navAll =
+            new Button();
+
+        private readonly Button _navInstalled =
+            new Button();
+
+        private readonly Button _navUpdates =
+            new Button();
+
+        private readonly Button _refresh =
+            new Button();
+
+        private readonly TextBox _search =
+            new TextBox();
+
+        private readonly Label _searchPlaceholder =
+            new Label();
+
+        private readonly Label _catalogStatus =
+            new Label();
+
+        private readonly ModListViewport _modList =
+            new ModListViewport();
+
+        private readonly StyledVScrollBar _modScroll =
+            new StyledVScrollBar();
+
+        private readonly PictureBox _selectedIdentity =
+            new PictureBox();
+
+        private readonly Label _selectedTitle =
+            new Label();
+
+        private readonly Label _selectedSubtitle =
+            new Label();
+
+        private readonly Label _selectedStatus =
+            new Label();
+
+        private readonly RichTextBox _details =
+            new RichTextBox();
+
+        private readonly Button _install =
+            new Button();
+
+        private readonly Button _manage =
+            new Button();
+
+        private readonly List<ModListItemControl> _rows =
+            new List<ModListItemControl>();
 
         private ManagerEngine _engine;
-        private IList<PackageStatus> _statuses = new List<PackageStatus>();
+
+        private IList<PackageStatus> _statuses =
+            new List<PackageStatus>();
+
+        private PackageStatus _selected;
+
+        private ModFilter _filter =
+            ModFilter.All;
+
+        private string _locale =
+            "ru";
+
+        private string _gameRoot;
 
         private ModPageLoadResult _loadedPage;
         private string _loadedPagePackageId;
@@ -53,289 +139,1533 @@ namespace StrandedDeepModManager
         {
             get
             {
-                string dir = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "BamEx",
-                    "StrandedDeepModManager");
+                string dir =
+                    Path.Combine(
+                        Environment.GetFolderPath(
+                            Environment.SpecialFolder.LocalApplicationData),
+                        "BamEx",
+                        "StrandedDeepModManager");
+
                 Directory.CreateDirectory(dir);
-                return Path.Combine(dir, "settings.json");
+
+                return Path.Combine(
+                    dir,
+                    "settings.json");
             }
         }
 
         public MainForm()
         {
-            Text = AppInfo.ProductName + " v" + AppInfo.Version;
-            StartPosition = FormStartPosition.CenterScreen;
-            MinimumSize = new Size(980, 620);
-            Size = new Size(1180, 760);
+            Text =
+                AppInfo.ProductName +
+                " v" +
+                AppInfo.Version;
 
-            _pageWorker.DoWork += PageWorkerDoWork;
-            _pageWorker.RunWorkerCompleted += PageWorkerCompleted;
+            StartPosition =
+                FormStartPosition.CenterScreen;
+
+            FormBorderStyle =
+                FormBorderStyle.None;
+
+            MinimumSize =
+                new Size(
+                    1100,
+                    720);
+
+            Size =
+                new Size(
+                    1200,
+                    800);
+
+            BackColor =
+                Theme.WindowBackground;
+
+            ForeColor =
+                Theme.TextPrimary;
+
+            Font =
+                Theme.UiFont(
+                    9F,
+                    FontStyle.Regular);
+
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer,
+                true);
+
+            _pageWorker.DoWork +=
+                PageWorkerDoWork;
+
+            _pageWorker.RunWorkerCompleted +=
+                PageWorkerCompleted;
 
             BuildUi();
             LoadSettings();
 
             Shown += delegate
             {
-                if (!String.IsNullOrWhiteSpace(_gameRoot.Text))
+                if (!String.IsNullOrWhiteSpace(
+                    _gameRoot))
+                {
                     RefreshCatalog(true);
+                }
                 else
+                {
                     ShowNoGameMessage();
+                }
             };
+        }
+
+        private bool IsRu
+        {
+            get
+            {
+                return String.Equals(
+                    _locale,
+                    "ru",
+                    StringComparison.OrdinalIgnoreCase);
+            }
         }
 
         private void BuildUi()
         {
-            Font = new Font("Segoe UI", 9F);
+            SuspendLayout();
 
-            TableLayoutPanel root = new TableLayoutPanel();
+            TableLayoutPanel root =
+                new TableLayoutPanel();
+
             root.Dock = DockStyle.Fill;
+            root.BackColor =
+                Theme.WindowBackground;
+
             root.ColumnCount = 1;
-            root.RowCount = 5;
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 190F));
+            root.RowCount = 3;
+
+            root.RowStyles.Add(
+                new RowStyle(
+                    SizeType.Absolute,
+                    120F));
+
+            root.RowStyles.Add(
+                new RowStyle(
+                    SizeType.Absolute,
+                    58F));
+
+            root.RowStyles.Add(
+                new RowStyle(
+                    SizeType.Percent,
+                    100F));
+
             Controls.Add(root);
 
-            TableLayoutPanel paths = new TableLayoutPanel();
-            paths.Dock = DockStyle.Top;
-            paths.AutoSize = true;
-            paths.Padding = new Padding(10, 10, 10, 4);
-            paths.ColumnCount = 4;
-            paths.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 75F));
-            paths.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            paths.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90F));
-            paths.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100F));
+            BuildHeader();
+            root.Controls.Add(
+                _header,
+                0,
+                0);
 
-            Label gameLabel = new Label();
-            gameLabel.Text = "Game:";
-            gameLabel.TextAlign = ContentAlignment.MiddleLeft;
-            gameLabel.Dock = DockStyle.Fill;
-            gameLabel.AutoSize = true;
+            Control nav =
+                BuildGlobalNavigation();
 
-            _gameRoot.Dock = DockStyle.Fill;
+            root.Controls.Add(
+                nav,
+                0,
+                1);
 
-            _browseGame.Text = "Browse...";
-            _browseGame.Dock = DockStyle.Fill;
-            _browseGame.Click += delegate { BrowseGameRoot(); };
+            Control content =
+                BuildContent();
 
-            _detectGame.Text = "Auto-detect";
-            _detectGame.Dock = DockStyle.Fill;
-            _detectGame.Click += delegate { DetectGameRoot(true); };
+            root.Controls.Add(
+                content,
+                0,
+                2);
 
-            paths.Controls.Add(gameLabel, 0, 0);
-            paths.Controls.Add(_gameRoot, 1, 0);
-            paths.Controls.Add(_browseGame, 2, 0);
-            paths.Controls.Add(_detectGame, 3, 0);
+            ApplyLanguage();
 
-            root.Controls.Add(paths, 0, 0);
+            ResumeLayout(true);
+        }
 
-            Panel catalogPanel = new Panel();
-            catalogPanel.Dock = DockStyle.Fill;
-            catalogPanel.Height = 27;
-            catalogPanel.Padding = new Padding(10, 0, 10, 4);
+        private void BuildHeader()
+        {
+            _header.Dock =
+                DockStyle.Fill;
 
-            _catalogStatus.AutoSize = true;
-            _catalogStatus.Text = "Catalog: " + AppInfo.CatalogUrl;
-            _catalogStatus.Dock = DockStyle.Fill;
-            catalogPanel.Controls.Add(_catalogStatus);
+            _header.BackgroundImage =
+                null;
 
-            root.Controls.Add(catalogPanel, 0, 1);
+            _header.BackColor =
+                Theme.Panel;
 
-            FlowLayoutPanel toolbar = new FlowLayoutPanel();
-            toolbar.Dock = DockStyle.Fill;
-            toolbar.AutoSize = true;
-            toolbar.Padding = new Padding(10, 0, 10, 6);
+            _header.Paint += HeaderPaint;
 
-            _refresh.Text = "Refresh";
-            _refresh.AutoSize = true;
-            _refresh.Click += delegate { RefreshCatalog(true); };
+            Label manager =
+                new Label();
 
-            _install.Text = "Install / Update";
-            _install.AutoSize = true;
-            _install.Click += delegate { InstallSelected(); };
+            manager.Text =
+                "M O D   M A N A G E R";
 
-            _uninstall.Text = "Uninstall";
-            _uninstall.AutoSize = true;
-            _uninstall.Click += delegate { UninstallSelected(); };
+            manager.ForeColor =
+                Color.FromArgb(
+                    220,
+                    240,
+                    240,
+                    238);
 
-            Label languageLabel = new Label();
-            languageLabel.Text = "Page:";
-            languageLabel.AutoSize = true;
-            languageLabel.Margin = new Padding(18, 7, 3, 0);
+            manager.BackColor =
+                Color.Transparent;
 
-            _language.DropDownStyle = ComboBoxStyle.DropDownList;
-            _language.Width = 64;
-            _language.Items.Add("RU");
-            _language.Items.Add("EN");
-            _language.SelectedIndex = 0;
-            _language.SelectedIndexChanged += delegate
+            manager.Font =
+                Theme.UiFont(
+                    10.5F,
+                    FontStyle.Regular);
+
+            manager.AutoSize =
+                true;
+
+            manager.Location =
+                new Point(
+                    64,
+                    78);
+
+            _header.Controls.Add(
+                manager);
+
+            _langRu.Size =
+                new Size(
+                    46,
+                    34);
+
+            _langRu.Location =
+                new Point(
+                    996,
+                    16);
+
+            _langRu.Anchor =
+                AnchorStyles.Top |
+                AnchorStyles.Right;
+
+            _langRu.Text = "RU";
+
+            _langRu.Click += delegate
             {
-                ShowSelectedDetails();
-                BeginLoadSelectedPage();
+                SetLanguage("ru");
             };
 
-            _summary.AutoSize = true;
-            _summary.Margin = new Padding(18, 7, 0, 0);
+            _langEn.Size =
+                new Size(
+                    46,
+                    34);
 
-            toolbar.Controls.Add(_refresh);
-            toolbar.Controls.Add(_install);
-            toolbar.Controls.Add(_uninstall);
-            toolbar.Controls.Add(languageLabel);
-            toolbar.Controls.Add(_language);
-            toolbar.Controls.Add(_summary);
+            _langEn.Location =
+                new Point(
+                    1044,
+                    16);
 
-            root.Controls.Add(toolbar, 0, 2);
+            _langEn.Anchor =
+                AnchorStyles.Top |
+                AnchorStyles.Right;
 
-            _list.Dock = DockStyle.Fill;
-            _list.View = View.Details;
-            _list.FullRowSelect = true;
-            _list.GridLines = true;
-            _list.HideSelection = false;
-            _list.MultiSelect = false;
-            _list.Columns.Add("Mod", 300);
-            _list.Columns.Add("Available", 90);
-            _list.Columns.Add("Installed", 90);
-            _list.Columns.Add("Status", 160);
-            _list.Columns.Add("Category", 120);
-            _list.SelectedIndexChanged += delegate
+            _langEn.Text = "EN";
+
+            _langEn.Click += delegate
             {
-                ShowSelectedDetails();
-                BeginLoadSelectedPage();
+                SetLanguage("en");
             };
 
-            root.Controls.Add(_list, 0, 3);
+            _settings.Size =
+                new Size(
+                    132,
+                    34);
 
-            _details.Dock = DockStyle.Fill;
-            _details.Multiline = true;
+            _settings.Location =
+                new Point(
+                    958,
+                    60);
+
+            _settings.Anchor =
+                AnchorStyles.Top |
+                AnchorStyles.Right;
+
+            _settings.Image =
+                UiAssets.SystemIcon(
+                    AssetKeys.SystemUi.Settings);
+
+            _settings.TextImageRelation =
+                TextImageRelation.ImageBeforeText;
+
+            _settings.Click += delegate
+            {
+                OpenSettings();
+            };
+
+            _header.Controls.Add(
+                _langRu);
+
+            _header.Controls.Add(
+                _langEn);
+
+            _header.Controls.Add(
+                _settings);
+
+            ConfigureWindowButton(
+                _minimizeWindow,
+                AssetKeys.SystemUi.Minimize);
+
+            ConfigureWindowButton(
+                _maximizeWindow,
+                AssetKeys.SystemUi.Maximize);
+
+            ConfigureWindowButton(
+                _closeWindow,
+                AssetKeys.SystemUi.Close);
+
+            _minimizeWindow.Click += delegate
+            {
+                WindowState =
+                    FormWindowState.Minimized;
+            };
+
+            _maximizeWindow.Click += delegate
+            {
+                ToggleWindowMaximize();
+            };
+
+            _closeWindow.Click += delegate
+            {
+                Close();
+            };
+
+            _closeWindow.FlatAppearance.MouseOverBackColor =
+                Theme.Error;
+
+            _windowToolTip.SetToolTip(
+                _minimizeWindow,
+                "Minimize");
+
+            _windowToolTip.SetToolTip(
+                _maximizeWindow,
+                "Maximize / Restore");
+
+            _windowToolTip.SetToolTip(
+                _closeWindow,
+                "Close");
+
+            _header.Controls.Add(
+                _minimizeWindow);
+
+            _header.Controls.Add(
+                _maximizeWindow);
+
+            _header.Controls.Add(
+                _closeWindow);
+
+            _header.MouseDown += HeaderMouseDown;
+            _header.DoubleClick += HeaderDoubleClick;
+
+            manager.MouseDown += HeaderMouseDown;
+            manager.DoubleClick += HeaderDoubleClick;
+
+            _header.Resize += delegate
+            {
+                _header.Invalidate();
+
+                int right =
+                    _header.ClientSize.Width - 12;
+
+                _closeWindow.Left =
+                    right -
+                    _closeWindow.Width;
+
+                _maximizeWindow.Left =
+                    _closeWindow.Left -
+                    _maximizeWindow.Width -
+                    2;
+
+                _minimizeWindow.Left =
+                    _maximizeWindow.Left -
+                    _minimizeWindow.Width -
+                    2;
+
+                _langEn.Left =
+                    _minimizeWindow.Left -
+                    _langEn.Width -
+                    14;
+
+                _langRu.Left =
+                    _langEn.Left -
+                    _langRu.Width -
+                    2;
+
+                _settings.Left =
+                    right -
+                    _settings.Width;
+
+                _settings.Top = 60;
+            };
+        }
+
+        private void ConfigureWindowButton(
+            Button button,
+            string iconKey)
+        {
+            button.Size =
+                new Size(
+                    34,
+                    30);
+
+            button.Top = 10;
+            button.Text = "";
+
+            button.Image =
+                UiAssets.SystemIcon(
+                    iconKey);
+
+            Theme.StyleHeaderButton(
+                button,
+                false);
+
+            button.FlatAppearance.BorderSize = 0;
+        }
+
+        private void HeaderMouseDown(
+            object sender,
+            MouseEventArgs e)
+        {
+            if (e.Button ==
+                MouseButtons.Left)
+            {
+                BeginWindowDrag();
+            }
+        }
+
+        private void HeaderDoubleClick(
+            object sender,
+            EventArgs e)
+        {
+            ToggleWindowMaximize();
+        }
+
+        private void HeaderPaint(
+            object sender,
+            PaintEventArgs e)
+        {
+            Image image =
+                UiAssets.HeaderBackground();
+
+            if (image == null ||
+                _header.ClientSize.Width <= 0 ||
+                _header.ClientSize.Height <= 0)
+            {
+                return;
+            }
+
+            DrawCoverImage(
+                e.Graphics,
+                image,
+                _header.ClientRectangle);
+        }
+
+        private static void DrawCoverImage(
+            Graphics graphics,
+            Image image,
+            Rectangle bounds)
+        {
+            if (graphics == null ||
+                image == null ||
+                bounds.Width <= 0 ||
+                bounds.Height <= 0 ||
+                image.Width <= 0 ||
+                image.Height <= 0)
+            {
+                return;
+            }
+
+            float scaleToWidth =
+                (float)bounds.Width /
+                (float)image.Width;
+
+            float designScale =
+                1200F /
+                (float)image.Width;
+
+            float scale =
+                Math.Min(
+                    scaleToWidth,
+                    designScale);
+
+            int width =
+                (int)Math.Ceiling(
+                    image.Width * scale);
+
+            int height =
+                (int)Math.Ceiling(
+                    image.Height * scale);
+
+            int x =
+                bounds.Left;
+
+            int y =
+                bounds.Top;
+
+            InterpolationMode previous =
+                graphics.InterpolationMode;
+
+            PixelOffsetMode previousPixel =
+                graphics.PixelOffsetMode;
+
+            graphics.InterpolationMode =
+                InterpolationMode.HighQualityBicubic;
+
+            graphics.PixelOffsetMode =
+                PixelOffsetMode.HighQuality;
+
+            if (x > bounds.Left)
+            {
+                int leftGap =
+                    x - bounds.Left;
+
+                graphics.DrawImage(
+                    image,
+                    new Rectangle(
+                        bounds.Left,
+                        bounds.Top,
+                        leftGap,
+                        bounds.Height),
+                    new Rectangle(
+                        0,
+                        0,
+                        Math.Min(
+                            24,
+                            image.Width),
+                        image.Height),
+                    GraphicsUnit.Pixel);
+            }
+
+            int rightStart =
+                x + width;
+
+            int rightEdge =
+                bounds.Right;
+
+            graphics.DrawImage(
+                image,
+                new Rectangle(
+                    x,
+                    y,
+                    width,
+                    height));
+
+            if (rightStart < rightEdge)
+            {
+                using (SolidBrush fill =
+                    new SolidBrush(
+                        Theme.Panel))
+                {
+                    graphics.FillRectangle(
+                        fill,
+                        new Rectangle(
+                            rightStart,
+                            bounds.Top,
+                            rightEdge - rightStart,
+                            bounds.Height));
+                }
+
+                int fadeWidth =
+                    Math.Min(
+                        220,
+                        Math.Max(
+                            80,
+                            width / 5));
+
+                int fadeLeft =
+                    Math.Max(
+                        bounds.Left,
+                        rightStart - fadeWidth);
+
+                using (LinearGradientBrush fade =
+                    new LinearGradientBrush(
+                        new Rectangle(
+                            fadeLeft,
+                            bounds.Top,
+                            Math.Max(
+                                1,
+                                rightStart - fadeLeft),
+                            bounds.Height),
+                        Color.FromArgb(
+                            0,
+                            Theme.Panel),
+                        Theme.Panel,
+                        LinearGradientMode.Horizontal))
+                {
+                    graphics.FillRectangle(
+                        fade,
+                        new Rectangle(
+                            fadeLeft,
+                            bounds.Top,
+                            Math.Max(
+                                1,
+                                rightStart - fadeLeft),
+                            bounds.Height));
+                }
+            }
+
+            graphics.InterpolationMode =
+                previous;
+
+            graphics.PixelOffsetMode =
+                previousPixel;
+        }
+        private Control BuildGlobalNavigation()
+        {
+            TableLayoutPanel nav =
+                new TableLayoutPanel();
+
+            nav.Dock =
+                DockStyle.Fill;
+
+            nav.BackColor =
+                Theme.Panel;
+
+            nav.Padding =
+                new Padding(
+                    46,
+                    10,
+                    46,
+                    8);
+
+            nav.ColumnCount = 3;
+
+            nav.ColumnStyles.Add(
+                new ColumnStyle(
+                    SizeType.AutoSize));
+
+            nav.ColumnStyles.Add(
+                new ColumnStyle(
+                    SizeType.Percent,
+                    100F));
+
+            nav.ColumnStyles.Add(
+                new ColumnStyle(
+                    SizeType.Absolute,
+                    270F));
+
+            FlowLayoutPanel filters =
+                new FlowLayoutPanel();
+
+            filters.Dock =
+                DockStyle.Fill;
+
+            filters.AutoSize = true;
+            filters.WrapContents = false;
+            filters.Margin = Padding.Empty;
+
+            ConfigureNavButton(
+                _navAll,
+                AssetKeys.SystemUi.AllMods,
+                146);
+
+            ConfigureNavButton(
+                _navInstalled,
+                AssetKeys.SystemUi.Installed,
+                166);
+
+            ConfigureNavButton(
+                _navUpdates,
+                AssetKeys.SystemUi.Updates,
+                144);
+
+            _navAll.Click += delegate
+            {
+                SetFilter(
+                    ModFilter.All);
+            };
+
+            _navInstalled.Click += delegate
+            {
+                SetFilter(
+                    ModFilter.Installed);
+            };
+
+            _navUpdates.Click += delegate
+            {
+                SetFilter(
+                    ModFilter.Updates);
+            };
+
+            filters.Controls.Add(
+                _navAll);
+
+            filters.Controls.Add(
+                _navInstalled);
+
+            filters.Controls.Add(
+                _navUpdates);
+
+            nav.Controls.Add(
+                filters,
+                0,
+                0);
+
+            FlowLayoutPanel status =
+                new FlowLayoutPanel();
+
+            status.Dock =
+                DockStyle.Fill;
+
+            status.FlowDirection =
+                FlowDirection.RightToLeft;
+
+            status.WrapContents =
+                false;
+
+            status.Margin =
+                new Padding(
+                    8,
+                    0,
+                    8,
+                    0);
+
+            _refresh.Size =
+                new Size(
+                    36,
+                    34);
+
+            _refresh.Image =
+                UiAssets.SystemIcon(
+                    AssetKeys.SystemUi.Refresh);
+
+            _refresh.Text = "";
+
+            Theme.StyleNavButton(
+                _refresh,
+                false);
+
+            _refresh.Click += delegate
+            {
+                RefreshCatalog(true);
+            };
+
+            _catalogStatus.AutoSize =
+                true;
+
+            _catalogStatus.ForeColor =
+                Theme.TextSecondary;
+
+            _catalogStatus.TextAlign =
+                ContentAlignment.MiddleRight;
+
+            _catalogStatus.Margin =
+                new Padding(
+                    8,
+                    9,
+                    2,
+                    0);
+
+            status.Controls.Add(
+                _refresh);
+
+            status.Controls.Add(
+                _catalogStatus);
+
+            nav.Controls.Add(
+                status,
+                1,
+                0);
+
+            Panel searchPanel =
+                new Panel();
+
+            searchPanel.Dock =
+                DockStyle.Fill;
+
+            searchPanel.BackColor =
+                Theme.WindowBackground;
+
+            searchPanel.Padding =
+                new Padding(
+                    10,
+                    6,
+                    8,
+                    4);
+
+            PictureBox searchIcon =
+                new PictureBox();
+
+            searchIcon.Image =
+                UiAssets.SystemIcon(
+                    AssetKeys.SystemUi.Search);
+
+            searchIcon.SizeMode =
+                PictureBoxSizeMode.Zoom;
+
+            searchIcon.Size =
+                new Size(
+                    20,
+                    20);
+
+            searchIcon.Location =
+                new Point(
+                    10,
+                    9);
+
+            searchIcon.BackColor =
+                Color.Transparent;
+
+            _search.BorderStyle =
+                BorderStyle.None;
+
+            _search.BackColor =
+                Theme.WindowBackground;
+
+            _search.ForeColor =
+                Theme.TextPrimary;
+
+            _search.Font =
+                Theme.UiFont(
+                    9F,
+                    FontStyle.Regular);
+
+            _search.Location =
+                new Point(
+                    38,
+                    9);
+
+            _search.Width = 214;
+
+            _search.TextChanged += delegate
+            {
+                _searchPlaceholder.Visible =
+                    _search.TextLength == 0 &&
+                    !_search.Focused;
+
+                RenderStatuses();
+            };
+
+            _search.Enter += delegate
+            {
+                _searchPlaceholder.Visible = false;
+            };
+
+            _search.Leave += delegate
+            {
+                _searchPlaceholder.Visible =
+                    _search.TextLength == 0;
+            };
+
+            _searchPlaceholder.AutoSize = true;
+            _searchPlaceholder.ForeColor =
+                Theme.TextSecondary;
+            _searchPlaceholder.BackColor =
+                Color.Transparent;
+            _searchPlaceholder.Font =
+                Theme.UiFont(
+                    9F,
+                    FontStyle.Regular);
+            _searchPlaceholder.Location =
+                new Point(
+                    38,
+                    9);
+            _searchPlaceholder.Cursor =
+                Cursors.IBeam;
+            _searchPlaceholder.Click += delegate
+            {
+                _search.Focus();
+            };
+
+            searchPanel.Controls.Add(
+                searchIcon);
+
+            searchPanel.Controls.Add(
+                _search);
+
+            searchPanel.Controls.Add(
+                _searchPlaceholder);
+
+            _searchPlaceholder.BringToFront();
+
+            searchPanel.Paint += delegate(
+                object sender,
+                PaintEventArgs e)
+            {
+                using (Pen pen =
+                    new Pen(
+                        Theme.Border,
+                        1F))
+                {
+                    e.Graphics.DrawRectangle(
+                        pen,
+                        0,
+                        0,
+                        searchPanel.Width - 1,
+                        searchPanel.Height - 1);
+                }
+            };
+
+            nav.Controls.Add(
+                searchPanel,
+                2,
+                0);
+
+            return nav;
+        }
+
+        private void ConfigureNavButton(
+            Button button,
+            string iconKey,
+            int width)
+        {
+            button.Width = width;
+            button.Height = 36;
+            button.Margin =
+                new Padding(
+                    0,
+                    0,
+                    10,
+                    0);
+
+            button.Image =
+                UiAssets.SystemIcon(
+                    iconKey);
+
+            Theme.StyleNavButton(
+                button,
+                false);
+        }
+
+        private Control BuildContent()
+        {
+            TableLayoutPanel content =
+                new TableLayoutPanel();
+
+            content.Dock =
+                DockStyle.Fill;
+
+            content.BackColor =
+                Theme.WindowBackground;
+
+            content.Padding =
+                new Padding(
+                    46,
+                    10,
+                    46,
+                    32);
+
+            content.ColumnCount = 3;
+
+            content.ColumnStyles.Add(
+                new ColumnStyle(
+                    SizeType.Absolute,
+                    410F));
+
+            content.ColumnStyles.Add(
+                new ColumnStyle(
+                    SizeType.Absolute,
+                    20F));
+
+            content.ColumnStyles.Add(
+                new ColumnStyle(
+                    SizeType.Percent,
+                    100F));
+
+            Panel listBorder =
+                new Panel();
+
+            listBorder.Dock =
+                DockStyle.Fill;
+
+            listBorder.BackColor =
+                Theme.Border;
+
+            listBorder.Padding =
+                new Padding(1);
+
+            _modList.Dock =
+                DockStyle.Fill;
+
+            _modList.AutoScroll =
+                false;
+
+            _modList.BackColor =
+                Theme.Panel;
+
+            _modList.Padding =
+                new Padding(
+                    8,
+                    8,
+                    8,
+                    8);
+
+            _modList.Resize += delegate
+            {
+                LayoutModRows();
+            };
+
+            _modList.MouseWheel += delegate(
+                object sender,
+                MouseEventArgs e)
+            {
+                int step =
+                    Math.Max(
+                        42,
+                        Math.Abs(e.Delta) / 3);
+
+                _modScroll.ScrollBy(
+                    e.Delta > 0
+                        ? -step
+                        : step);
+            };
+
+            _modScroll.Width = 10;
+            _modScroll.Dock =
+                DockStyle.Right;
+
+            _modScroll.ValueChanged += delegate
+            {
+                LayoutModRows();
+            };
+
+            Panel listHost =
+                new Panel();
+
+            listHost.Dock =
+                DockStyle.Fill;
+
+            listHost.BackColor =
+                Theme.Panel;
+
+            _modList.Dock =
+                DockStyle.Fill;
+
+            listHost.Controls.Add(
+                _modList);
+
+            listHost.Controls.Add(
+                _modScroll);
+
+            _modScroll.BringToFront();
+
+            listBorder.Controls.Add(
+                listHost);
+
+            content.Controls.Add(
+                listBorder,
+                0,
+                0);
+
+            Panel rightBorder =
+                new Panel();
+
+            rightBorder.Dock =
+                DockStyle.Fill;
+
+            rightBorder.BackColor =
+                Theme.Border;
+
+            rightBorder.Padding =
+                new Padding(1);
+
+            Panel right =
+                new Panel();
+
+            right.Dock =
+                DockStyle.Fill;
+
+            right.BackColor =
+                Theme.Panel;
+
+            rightBorder.Controls.Add(
+                right);
+
+            BuildRightStageOne(
+                right);
+
+            content.Controls.Add(
+                rightBorder,
+                2,
+                0);
+
+            return content;
+        }
+
+        private void BuildRightStageOne(
+            Panel parent)
+        {
+            Panel header =
+                new Panel();
+
+            header.Dock =
+                DockStyle.Top;
+
+            header.Height = 96;
+
+            header.BackColor =
+                Theme.PanelRaised;
+
+            TableLayoutPanel headerLayout =
+                new TableLayoutPanel();
+
+            headerLayout.Dock =
+                DockStyle.Fill;
+
+            headerLayout.BackColor =
+                Theme.PanelRaised;
+
+            headerLayout.Padding =
+                new Padding(
+                    14,
+                    10,
+                    14,
+                    10);
+
+            headerLayout.ColumnCount = 3;
+
+            headerLayout.ColumnStyles.Add(
+                new ColumnStyle(
+                    SizeType.Absolute,
+                    76F));
+
+            headerLayout.ColumnStyles.Add(
+                new ColumnStyle(
+                    SizeType.Percent,
+                    100F));
+
+            headerLayout.ColumnStyles.Add(
+                new ColumnStyle(
+                    SizeType.Absolute,
+                    142F));
+
+            headerLayout.RowCount = 2;
+
+            headerLayout.RowStyles.Add(
+                new RowStyle(
+                    SizeType.Percent,
+                    45F));
+
+            headerLayout.RowStyles.Add(
+                new RowStyle(
+                    SizeType.Percent,
+                    55F));
+
+            _selectedIdentity.Dock =
+                DockStyle.Fill;
+
+            _selectedIdentity.Margin =
+                new Padding(
+                    0,
+                    0,
+                    10,
+                    0);
+
+            _selectedIdentity.SizeMode =
+                PictureBoxSizeMode.Zoom;
+
+            _selectedIdentity.BackColor =
+                Color.Transparent;
+
+            _selectedTitle.Dock =
+                DockStyle.Fill;
+
+            _selectedTitle.Margin =
+                new Padding(
+                    0,
+                    1,
+                    8,
+                    0);
+
+            _selectedTitle.ForeColor =
+                Theme.TextPrimary;
+
+            _selectedTitle.Font =
+                Theme.UiFont(
+                    15F,
+                    FontStyle.Bold);
+
+            _selectedTitle.TextAlign =
+                ContentAlignment.BottomLeft;
+
+            _selectedTitle.AutoEllipsis =
+                true;
+
+            _selectedSubtitle.Dock =
+                DockStyle.Fill;
+
+            _selectedSubtitle.Margin =
+                new Padding(
+                    0,
+                    2,
+                    8,
+                    0);
+
+            _selectedSubtitle.ForeColor =
+                Theme.TextSecondary;
+
+            _selectedSubtitle.Font =
+                Theme.UiFont(
+                    9F,
+                    FontStyle.Regular);
+
+            _selectedSubtitle.TextAlign =
+                ContentAlignment.TopLeft;
+
+            _selectedSubtitle.AutoEllipsis =
+                true;
+
+            _selectedStatus.Dock =
+                DockStyle.Fill;
+
+            _selectedStatus.Margin =
+                new Padding(
+                    8,
+                    13,
+                    0,
+                    13);
+
+            _selectedStatus.TextAlign =
+                ContentAlignment.MiddleCenter;
+
+            _selectedStatus.ForeColor =
+                Theme.TextPrimary;
+
+            _selectedStatus.Font =
+                Theme.UiFont(
+                    8.5F,
+                    FontStyle.Regular);
+
+            headerLayout.Controls.Add(
+                _selectedIdentity,
+                0,
+                0);
+
+            headerLayout.SetRowSpan(
+                _selectedIdentity,
+                2);
+
+            headerLayout.Controls.Add(
+                _selectedTitle,
+                1,
+                0);
+
+            headerLayout.Controls.Add(
+                _selectedSubtitle,
+                1,
+                1);
+
+            headerLayout.Controls.Add(
+                _selectedStatus,
+                2,
+                0);
+
+            headerLayout.SetRowSpan(
+                _selectedStatus,
+                2);
+
+            header.Controls.Add(
+                headerLayout);
+
+            parent.Controls.Add(
+                header);
+
+            Panel actions =
+                new Panel();
+
+            actions.Dock =
+                DockStyle.Bottom;
+
+            actions.Height = 66;
+
+            actions.BackColor =
+                Theme.PanelRaised;
+
+            actions.Padding =
+                new Padding(
+                    12,
+                    12,
+                    12,
+                    10);
+
+            _manage.Dock =
+                DockStyle.Right;
+
+            _manage.Width = 170;
+
+            _manage.Margin =
+                new Padding(
+                    8,
+                    0,
+                    0,
+                    0);
+
+            _manage.Image =
+                UiAssets.SystemIcon(
+                    AssetKeys.SystemUi.Manage);
+
+            _manage.Click += delegate
+            {
+                ShowManageMenu();
+            };
+
+            Theme.StyleActionButton(
+                _manage,
+                Color.FromArgb(
+                    0x36,
+                    0x31,
+                    0x29),
+                Theme.AccentSand);
+
+            _install.Dock =
+                DockStyle.Right;
+
+            _install.Width = 190;
+
+            _install.Margin =
+                new Padding(
+                    8,
+                    0,
+                    0,
+                    0);
+
+            _install.Click += delegate
+            {
+                InstallSelected();
+            };
+
+            Theme.StyleActionButton(
+                _install,
+                Theme.UpdateBlue,
+                Theme.AccentCyan);
+
+            actions.Controls.Add(
+                _manage);
+
+            actions.Controls.Add(
+                _install);
+
+            parent.Controls.Add(
+                actions);
+
+            _details.Dock =
+                DockStyle.Fill;
+
             _details.ReadOnly = true;
-            _details.ScrollBars = ScrollBars.Vertical;
-            _details.Font = new Font("Consolas", 9F);
-            _details.Margin = new Padding(10);
+            _details.BorderStyle =
+                BorderStyle.None;
 
-            root.Controls.Add(_details, 0, 4);
+            _details.BackColor =
+                Theme.Panel;
+
+            _details.ForeColor =
+                Theme.TextPrimary;
+
+            _details.Font =
+                Theme.UiFont(
+                    9.25F,
+                    FontStyle.Regular);
+
+            _details.ScrollBars =
+                RichTextBoxScrollBars.Vertical;
+
+            _details.DetectUrls =
+                false;
+
+            _details.Margin =
+                new Padding(0);
+
+            parent.Controls.Add(
+                _details);
+
+            _details.BringToFront();
         }
 
         private void LoadSettings()
         {
-            ManagerSettings settings = null;
+            ManagerSettings settings =
+                null;
 
             try
             {
-                if (File.Exists(SettingsPath))
-                    settings = JsonUtil.ReadFile<ManagerSettings>(SettingsPath);
+                if (File.Exists(
+                    SettingsPath))
+                {
+                    settings =
+                        JsonUtil.ReadFile<ManagerSettings>(
+                            SettingsPath);
+                }
             }
             catch
             {
             }
 
             if (settings == null)
-                settings = new ManagerSettings();
+                settings =
+                    new ManagerSettings();
 
-            if (!String.IsNullOrWhiteSpace(settings.gameRoot) && GameLocator.LooksLikeGameRoot(settings.gameRoot))
+            if (!String.IsNullOrWhiteSpace(
+                    settings.gameRoot) &&
+                GameLocator.LooksLikeGameRoot(
+                    settings.gameRoot))
             {
-                _gameRoot.Text = settings.gameRoot;
+                _gameRoot =
+                    settings.gameRoot;
+
                 return;
             }
 
-            DetectGameRoot(false);
+            string detected =
+                GameLocator.FindGameRoot();
+
+            if (!String.IsNullOrWhiteSpace(
+                detected))
+            {
+                _gameRoot =
+                    detected;
+
+                SaveSettings();
+            }
         }
 
         private void SaveSettings()
         {
-            ManagerSettings settings = new ManagerSettings();
-            settings.gameRoot = _gameRoot.Text.Trim();
-            JsonUtil.WriteFile(SettingsPath, settings);
+            ManagerSettings settings =
+                new ManagerSettings();
+
+            settings.gameRoot =
+                _gameRoot;
+
+            JsonUtil.WriteFile(
+                SettingsPath,
+                settings);
         }
 
-        private void DetectGameRoot(bool showResult)
+        private void OpenSettings()
         {
-            string detected = GameLocator.FindGameRoot();
+            string catalog =
+                _engine == null
+                    ? _catalogStatus.Text
+                    : _engine.CatalogStatus;
 
-            if (!String.IsNullOrWhiteSpace(detected))
+            string dataRoot =
+                _engine == null
+                    ? Path.Combine(
+                        Environment.GetFolderPath(
+                            Environment.SpecialFolder.LocalApplicationData),
+                        "BamEx",
+                        "StrandedDeepModManager")
+                    : _engine.DataRoot;
+
+            using (SettingsForm form =
+                new SettingsForm(
+                    _gameRoot,
+                    catalog,
+                    dataRoot,
+                    _locale))
             {
-                _gameRoot.Text = detected;
-                SaveSettings();
-
-                if (showResult)
+                if (form.ShowDialog(this) !=
+                    DialogResult.OK)
                 {
-                    MessageBox.Show(
-                        this,
-                        "Stranded Deep found:\r\n" + detected,
-                        "Game detected",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Information);
-                }
-            }
-            else if (showResult)
-            {
-                MessageBox.Show(
-                    this,
-                    "Stranded Deep could not be found automatically. Use Browse... to select the game directory.",
-                    "Game not found",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-            }
-        }
-
-        private void BrowseGameRoot()
-        {
-            using (FolderBrowserDialog dialog = new FolderBrowserDialog())
-            {
-                dialog.Description = "Select the Stranded Deep game directory";
-                dialog.ShowNewFolderButton = false;
-
-                if (Directory.Exists(_gameRoot.Text.Trim()))
-                    dialog.SelectedPath = _gameRoot.Text.Trim();
-
-                if (dialog.ShowDialog(this) != DialogResult.OK)
                     return;
+                }
 
-                if (!GameLocator.LooksLikeGameRoot(dialog.SelectedPath))
+                if (String.Equals(
+                    form.GameRoot,
+                    _gameRoot,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                if (!GameLocator.LooksLikeGameRoot(
+                    form.GameRoot))
                 {
                     MessageBox.Show(
                         this,
-                        "The selected folder does not look like the Stranded Deep game directory.",
-                        "Invalid game directory",
+                        IsRu
+                            ? "Выбранная папка не похожа на папку Stranded Deep."
+                            : "The selected folder does not look like the Stranded Deep game directory.",
+                        IsRu
+                            ? "Неверная папка игры"
+                            : "Invalid game directory",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Warning);
+
                     return;
                 }
 
-                _gameRoot.Text = dialog.SelectedPath;
+                _gameRoot =
+                    form.GameRoot;
+
                 SaveSettings();
                 RefreshCatalog(true);
             }
         }
 
-        private void RefreshCatalog(bool adoptExactMatches)
+        private void RefreshCatalog(
+            bool adoptExactMatches)
         {
+            if (String.IsNullOrWhiteSpace(
+                _gameRoot) ||
+                !GameLocator.LooksLikeGameRoot(
+                    _gameRoot))
+            {
+                ShowNoGameMessage();
+                return;
+            }
+
             SetBusy(true);
+
+            string selectedId =
+                _selected == null ||
+                _selected.CatalogPackage == null
+                    ? null
+                    : _selected.CatalogPackage.id;
 
             try
             {
                 SaveSettings();
 
-                _engine = new ManagerEngine(
-                    _gameRoot.Text.Trim(),
-                    AppInfo.CatalogUrl);
+                _engine =
+                    new ManagerEngine(
+                        _gameRoot,
+                        AppInfo.CatalogUrl);
 
                 _engine.LoadCatalog();
-                _catalogStatus.Text = "Catalog: " + _engine.CatalogStatus;
 
-                _statuses = _engine.ScanAll(adoptExactMatches);
+                _statuses =
+                    _engine.ScanAll(
+                        adoptExactMatches);
+
                 RenderStatuses();
+
+                if (!String.IsNullOrWhiteSpace(
+                    selectedId))
+                {
+                    PackageStatus previous =
+                        _statuses.FirstOrDefault(
+                            x =>
+                                x.CatalogPackage != null &&
+                                String.Equals(
+                                    x.CatalogPackage.id,
+                                    selectedId,
+                                    StringComparison.Ordinal));
+
+                    if (previous != null)
+                        SelectStatus(previous);
+                }
+
+                UpdateCatalogSummary();
             }
             catch (Exception ex)
             {
-                _catalogStatus.Text = "Catalog: unavailable";
+                _catalogStatus.Text =
+                    IsRu
+                        ? "Каталог недоступен"
+                        : "Catalog unavailable";
 
                 MessageBox.Show(
                     this,
                     ex.Message,
-                    "Refresh failed",
+                    IsRu
+                        ? "Ошибка обновления"
+                        : "Refresh failed",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
             }
@@ -347,62 +1677,804 @@ namespace StrandedDeepModManager
 
         private void RenderStatuses()
         {
-            _list.BeginUpdate();
+            string selectedId =
+                _selected == null ||
+                _selected.CatalogPackage == null
+                    ? null
+                    : _selected.CatalogPackage.id;
+
+            _modList.SuspendLayout();
+
             try
             {
-                _list.Items.Clear();
+                _modList.Controls.Clear();
+                _rows.Clear();
 
-                foreach (PackageStatus status in _statuses)
+                string query =
+                    _search.Text.Trim();
+
+                IEnumerable<PackageStatus> source =
+                    _statuses;
+
+                if (_filter ==
+                    ModFilter.Installed)
                 {
-                    string available = status.CatalogPackage.latest == null
-                        ? ""
-                        : status.CatalogPackage.latest.version;
+                    source =
+                        source.Where(
+                            x =>
+                                x.Kind != PackageStatusKind.NotInstalled &&
+                                x.Kind != PackageStatusKind.PackageMissing);
+                }
+                else if (_filter ==
+                    ModFilter.Updates)
+                {
+                    source =
+                        source.Where(
+                            x =>
+                                x.Kind == PackageStatusKind.UpdateAvailable);
+                }
 
-                    ListViewItem item = new ListViewItem(status.CatalogPackage.name);
-                    item.SubItems.Add(available);
-                    item.SubItems.Add(status.InstalledVersion ?? "");
-                    item.SubItems.Add(StatusText(status.Kind));
-                    item.SubItems.Add(status.CatalogPackage.category ?? "");
-                    item.Tag = status;
-                    _list.Items.Add(item);
+                if (!String.IsNullOrWhiteSpace(
+                    query))
+                {
+                    source =
+                        source.Where(
+                            x =>
+                                ContainsIgnoreCase(
+                                    x.CatalogPackage.name,
+                                    query) ||
+                                ContainsIgnoreCase(
+                                    x.CatalogPackage.id,
+                                    query) ||
+                                ContainsIgnoreCase(
+                                    x.CatalogPackage.description,
+                                    query));
+                }
+
+                foreach (PackageStatus status
+                    in source)
+                {
+                    ModListItemControl row =
+                        new ModListItemControl(
+                            status,
+                            _locale);
+
+                    row.Width =
+                        Math.Max(
+                            300,
+                            _modList.ClientSize.Width -
+                            20);
+
+                    row.Anchor =
+                        AnchorStyles.Left |
+                        AnchorStyles.Top;
+
+                    row.ItemSelected += delegate(
+                        object sender,
+                        EventArgs e)
+                    {
+                        ModListItemControl selectedRow =
+                            sender as ModListItemControl;
+
+                        if (selectedRow != null)
+                            SelectStatus(
+                                selectedRow.Status);
+                    };
+
+                    _rows.Add(row);
+                    _modList.Controls.Add(row);
+
+                    if (!String.IsNullOrWhiteSpace(
+                        selectedId) &&
+                        String.Equals(
+                            status.CatalogPackage.id,
+                            selectedId,
+                            StringComparison.Ordinal))
+                    {
+                        row.SetSelected(true);
+                    }
                 }
             }
             finally
             {
-                _list.EndUpdate();
+                LayoutModRows();
+                _modList.ResumeLayout(true);
             }
 
-            int installed = _statuses.Count(
-                s => s.Kind == PackageStatusKind.Installed ||
-                     s.Kind == PackageStatusKind.UpdateAvailable);
+            PackageStatus selected =
+                _statuses.FirstOrDefault(
+                    x =>
+                        x.CatalogPackage != null &&
+                        String.Equals(
+                            x.CatalogPackage.id,
+                            selectedId,
+                            StringComparison.Ordinal));
 
-            int updates = _statuses.Count(s => s.Kind == PackageStatusKind.UpdateAvailable);
-            int problems = _statuses.Count(
-                s => s.Kind == PackageStatusKind.DifferentBuild ||
-                     s.Kind == PackageStatusKind.Modified ||
-                     s.Kind == PackageStatusKind.PackageMissing ||
-                     s.Kind == PackageStatusKind.Error);
+            if (selected == null &&
+                _rows.Count > 0)
+            {
+                selected =
+                    _rows[0].Status;
+            }
 
-            _summary.Text =
-                "Packages: " + _statuses.Count +
-                "   Installed: " + installed +
-                "   Updates: " + updates +
-                "   Problems: " + problems;
+            if (selected != null)
+                SelectStatus(selected);
+            else
+                ClearSelection();
+
+            UpdateCatalogSummary();
+        }
+
+        private void LayoutModRows()
+        {
+            if (_modList == null ||
+                _modScroll == null)
+            {
+                return;
+            }
+
+            int rowHeight = 78;
+            int rowStep = 84;
+
+            int contentHeight =
+                (_rows.Count * rowStep) + 16;
+
+            int maximum =
+                Math.Max(
+                    0,
+                    contentHeight -
+                    _modList.ClientSize.Height);
+
+            _modScroll.SetRange(
+                maximum,
+                Math.Max(
+                    1,
+                    _modList.ClientSize.Height));
+
+            int width =
+                Math.Max(
+                    280,
+                    _modList.ClientSize.Width - 16);
+
+            int y =
+                8 -
+                _modScroll.Value;
+
+            foreach (ModListItemControl row
+                in _rows)
+            {
+                row.SetBounds(
+                    8,
+                    y,
+                    width,
+                    rowHeight);
+
+                y += rowStep;
+            }
+        }
+        private void SelectStatus(
+            PackageStatus status)
+        {
+            _selected =
+                status;
+
+            foreach (ModListItemControl row
+                in _rows)
+            {
+                row.SetSelected(
+                    Object.ReferenceEquals(
+                        row.Status,
+                        status) ||
+                    (
+                        row.Status.CatalogPackage != null &&
+                        status != null &&
+                        status.CatalogPackage != null &&
+                        String.Equals(
+                            row.Status.CatalogPackage.id,
+                            status.CatalogPackage.id,
+                            StringComparison.Ordinal)
+                    ));
+            }
+
+            ShowSelectedDetails();
+            BeginLoadSelectedPage();
+        }
+
+        private void ClearSelection()
+        {
+            _selected = null;
+
+            foreach (ModListItemControl row
+                in _rows)
+            {
+                row.SetSelected(false);
+            }
 
             ShowSelectedDetails();
         }
 
-        private static string StatusText(PackageStatusKind kind)
+        private void SetFilter(
+            ModFilter filter)
+        {
+            _filter =
+                filter;
+
+            UpdateFilterButtons();
+            RenderStatuses();
+        }
+
+        private void SetLanguage(
+            string locale)
+        {
+            if (String.Equals(
+                _locale,
+                locale,
+                StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            _locale =
+                locale;
+
+            ApplyLanguage();
+            RenderStatuses();
+            ShowSelectedDetails();
+            BeginLoadSelectedPage();
+        }
+
+        private void ApplyLanguage()
+        {
+            _settings.Text =
+                IsRu
+                    ? "Настройки"
+                    : "Settings";
+
+            _navAll.Text =
+                IsRu
+                    ? "Все моды"
+                    : "All Mods";
+
+            _navInstalled.Text =
+                IsRu
+                    ? "Установленные"
+                    : "Installed";
+
+            _navUpdates.Text =
+                IsRu
+                    ? "Обновления"
+                    : "Updates";
+
+            _search.Text =
+                _search.Text;
+
+            _langRu.Text = "RU";
+            _langEn.Text = "EN";
+
+            _searchPlaceholder.Text =
+                IsRu
+                    ? "Поиск модов..."
+                    : "Search mods...";
+
+            _searchPlaceholder.Visible =
+                _search.TextLength == 0 &&
+                !_search.Focused;
+
+            Theme.StyleHeaderButton(
+                _langRu,
+                IsRu);
+
+            Theme.StyleHeaderButton(
+                _langEn,
+                !IsRu);
+
+            Theme.StyleHeaderButton(
+                _settings,
+                false);
+
+            UpdateFilterButtons();
+            UpdateActionButtons();
+
+            foreach (ModListItemControl row
+                in _rows)
+            {
+                row.UpdateContent(
+                    _locale);
+            }
+        }
+
+        private void UpdateFilterButtons()
+        {
+            Theme.StyleNavButton(
+                _navAll,
+                _filter ==
+                    ModFilter.All);
+
+            Theme.StyleNavButton(
+                _navInstalled,
+                _filter ==
+                    ModFilter.Installed);
+
+            Theme.StyleNavButton(
+                _navUpdates,
+                _filter ==
+                    ModFilter.Updates);
+        }
+
+        private void UpdateCatalogSummary()
+        {
+            int installed =
+                _statuses.Count(
+                    x =>
+                        x.Kind == PackageStatusKind.Installed ||
+                        x.Kind == PackageStatusKind.UpdateAvailable);
+
+            int updates =
+                _statuses.Count(
+                    x =>
+                        x.Kind == PackageStatusKind.UpdateAvailable);
+
+            string source =
+                _engine == null
+                    ? ""
+                    : _engine.CatalogStatus;
+
+            _catalogStatus.Text =
+                String.Format(
+                    IsRu
+                        ? "{0} модов • {1} установлено • {2} обновлений"
+                        : "{0} mods • {1} installed • {2} updates",
+                    _statuses.Count,
+                    installed,
+                    updates);
+
+            if (!String.IsNullOrWhiteSpace(
+                source) &&
+                source.IndexOf(
+                    "cache",
+                    StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                _catalogStatus.Text +=
+                    IsRu
+                        ? " • кэш"
+                        : " • cache";
+            }
+        }
+
+        private void ShowSelectedDetails()
+        {
+            PackageStatus status =
+                SelectedStatus;
+
+            if (status == null)
+            {
+                _selectedIdentity.Image =
+                    null;
+
+                _selectedTitle.Text =
+                    IsRu
+                        ? "Выберите мод"
+                        : "Select a mod";
+
+                _selectedSubtitle.Text =
+                    IsRu
+                        ? "Страница выбранного мода появится здесь."
+                        : "The selected mod page will appear here.";
+
+                _selectedStatus.Text = "";
+
+                _details.Text =
+                    IsRu
+                        ? "Менеджер использует проверенный публичный stable catalog и GitHub Releases."
+                        : "The Manager uses the verified public stable catalog and GitHub Releases.";
+
+                UpdateActionButtons();
+                return;
+            }
+
+            CatalogPackage package =
+                status.CatalogPackage;
+
+            _selectedIdentity.Image =
+                UiAssets.Identity(
+                    package.id);
+
+            _selectedTitle.Text =
+                DisplayNames.Mod(
+                    package.name ?? package.id);
+
+            _selectedStatus.Text =
+                LocalizedStatus(
+                    status.Kind);
+
+            _selectedStatus.BackColor =
+                Theme.StatusBackColor(
+                    status.Kind);
+
+            _selectedSubtitle.Text =
+                package.description ?? "";
+
+            StringBuilder text =
+                new StringBuilder();
+
+            text.AppendLine(
+                String.Format(
+                    IsRu
+                        ? "Доступная версия: {0}"
+                        : "Available version: {0}",
+                    package.latest == null
+                        ? "-"
+                        : package.latest.version));
+
+            text.AppendLine(
+                String.Format(
+                    IsRu
+                        ? "Установленная версия: {0}"
+                        : "Installed version: {0}",
+                    status.InstalledVersion ?? "-"));
+
+            text.AppendLine(
+                String.Format(
+                    IsRu
+                        ? "Статус: {0}"
+                        : "Status: {0}",
+                    LocalizedStatus(
+                        status.Kind)));
+
+            text.AppendLine();
+
+            if (!String.IsNullOrWhiteSpace(
+                status.Detail))
+            {
+                text.AppendLine(
+                    status.Detail);
+
+                text.AppendLine();
+            }
+
+            if (package.page == null)
+            {
+                text.AppendLine(
+                    IsRu
+                        ? "Страница мода: базовые данные каталога"
+                        : "Product page: catalog fallback only");
+
+                text.AppendLine();
+                text.AppendLine(
+                    package.description ?? "");
+            }
+            else if (LoadedPageMatches(
+                package,
+                _locale))
+            {
+                AppendLoadedPage(
+                    text,
+                    _loadedPage);
+
+                if (_loadedPage != null &&
+                    _loadedPage.Locale != null &&
+                    !String.IsNullOrWhiteSpace(
+                        _loadedPage.Locale.subtitle))
+                {
+                    _selectedSubtitle.Text =
+                        _loadedPage.Locale.subtitle;
+                }
+            }
+            else
+            {
+                text.AppendLine(
+                    IsRu
+                        ? "Загрузка проверенной страницы мода..."
+                        : "Loading validated product page...");
+
+                if (!String.IsNullOrWhiteSpace(
+                    _pageLoadError))
+                {
+                    text.AppendLine();
+                    text.AppendLine(
+                        IsRu
+                            ? "Предупреждение:"
+                            : "Warning:");
+
+                    text.AppendLine(
+                        _pageLoadError);
+                }
+
+                text.AppendLine();
+                text.AppendLine(
+                    package.description ?? "");
+            }
+
+            _details.Text =
+                text.ToString();
+
+            UpdateActionButtons();
+        }
+
+        private void AppendLoadedPage(
+            StringBuilder text,
+            ModPageLoadResult page)
+        {
+            if (page == null)
+                return;
+
+            if (page.Locale != null &&
+                !String.IsNullOrWhiteSpace(
+                    page.Locale.description))
+            {
+                text.AppendLine(
+                    page.Locale.description);
+
+                text.AppendLine();
+            }
+
+            if (page.Page != null &&
+                page.Page.highlights != null &&
+                page.Page.highlights.Count > 0)
+            {
+                text.AppendLine(
+                    IsRu
+                        ? "Ключевые особенности:"
+                        : "Highlights:");
+
+                text.AppendLine(
+                    String.Join(
+                        "  •  ",
+                        page.Page.highlights.ToArray()));
+
+                text.AppendLine();
+            }
+
+            if (page.Locale != null &&
+                page.Locale.features != null &&
+                page.Locale.features.Count > 0)
+            {
+                text.AppendLine(
+                    String.Format(
+                        IsRu
+                            ? "Возможности ({0})"
+                            : "Features ({0})",
+                        page.Locale.features.Count));
+
+                foreach (string feature
+                    in page.Locale.features)
+                {
+                    text.AppendLine(
+                        "  • " +
+                        feature);
+                }
+
+                text.AppendLine();
+            }
+
+            int faq =
+                page.Locale == null ||
+                page.Locale.faq == null
+                    ? 0
+                    : page.Locale.faq.Count;
+
+            int screenshots =
+                page.Page == null ||
+                page.Page.media == null ||
+                page.Page.media.screenshots == null
+                    ? 0
+                    : page.Page.media.screenshots.Count;
+
+            text.AppendLine(
+                String.Format(
+                    "FAQ: {0}    Screenshots: {1}",
+                    faq,
+                    screenshots));
+
+            text.AppendLine(
+                String.Format(
+                    IsRu
+                        ? "Источник страницы: {0}"
+                        : "Page source: {0}",
+                    LocalizedPageSource(
+                        page.SourceKind)));
+
+            if (!String.IsNullOrWhiteSpace(
+                page.Warning))
+            {
+                text.AppendLine();
+                text.AppendLine(
+                    page.Warning);
+            }
+
+            if (!String.IsNullOrWhiteSpace(
+                page.MediaWarning))
+            {
+                text.AppendLine();
+                text.AppendLine(
+                    page.MediaWarning);
+            }
+        }
+
+        private string LocalizedPageSource(
+            ModPageSourceKind kind)
+        {
+            if (!IsRu)
+                return kind.ToString();
+
+            switch (kind)
+            {
+                case ModPageSourceKind.Online:
+                    return "Онлайн";
+
+                case ModPageSourceKind.ExactCache:
+                    return "Точный кэш";
+
+                case ModPageSourceKind.LastGoodCache:
+                    return "Последний рабочий кэш";
+
+                default:
+                    return kind.ToString();
+            }
+        }
+
+        private string LocalizedStatus(
+            PackageStatusKind kind)
         {
             switch (kind)
             {
-                case PackageStatusKind.NotInstalled: return "Not installed";
-                case PackageStatusKind.Installed: return "Installed";
-                case PackageStatusKind.UpdateAvailable: return "Update available";
-                case PackageStatusKind.DifferentBuild: return "Different build";
-                case PackageStatusKind.Modified: return "Modified / unknown";
-                case PackageStatusKind.PackageMissing: return "Package unavailable";
-                default: return "Error";
+                case PackageStatusKind.NotInstalled:
+                    return IsRu
+                        ? "Не установлен"
+                        : "Not installed";
+
+                case PackageStatusKind.Installed:
+                    return IsRu
+                        ? "Установлен"
+                        : "Installed";
+
+                case PackageStatusKind.UpdateAvailable:
+                    return IsRu
+                        ? "Доступно обновление"
+                        : "Update available";
+
+                case PackageStatusKind.DifferentBuild:
+                    return IsRu
+                        ? "Другой билд"
+                        : "Different build";
+
+                case PackageStatusKind.Modified:
+                    return IsRu
+                        ? "Изменён / неизвестен"
+                        : "Modified / unknown";
+
+                case PackageStatusKind.PackageMissing:
+                    return IsRu
+                        ? "Пакет недоступен"
+                        : "Package unavailable";
+
+                default:
+                    return IsRu
+                        ? "Ошибка"
+                        : "Error";
+            }
+        }
+
+        private void UpdateActionButtons()
+        {
+            PackageStatus status =
+                SelectedStatus;
+
+            bool canInstall =
+                status != null &&
+                (
+                    status.Kind == PackageStatusKind.NotInstalled ||
+                    status.Kind == PackageStatusKind.UpdateAvailable ||
+                    status.Kind == PackageStatusKind.DifferentBuild ||
+                    status.Kind == PackageStatusKind.Modified
+                );
+
+            bool canUninstall =
+                status != null &&
+                (
+                    status.Kind == PackageStatusKind.Installed ||
+                    status.Kind == PackageStatusKind.UpdateAvailable ||
+                    status.Kind == PackageStatusKind.DifferentBuild ||
+                    status.Kind == PackageStatusKind.Modified
+                );
+
+            _manage.Visible =
+                canUninstall;
+
+            _manage.Enabled =
+                canUninstall;
+
+            _manage.Text =
+                IsRu
+                    ? "Управление"
+                    : "Manage";
+
+            if (status != null &&
+                status.Kind ==
+                    PackageStatusKind.Installed)
+            {
+                _install.Visible =
+                    false;
+            }
+            else if (status != null &&
+                status.Kind ==
+                    PackageStatusKind.UpdateAvailable)
+            {
+                _install.Visible =
+                    true;
+
+                Theme.StyleActionButton(
+                    _install,
+                    Theme.UpdateBlue,
+                    Theme.AccentCyan);
+
+                _install.Text =
+                    IsRu
+                        ? "Обновить"
+                        : "Update";
+
+                _install.Image =
+                    UiAssets.SystemIcon(
+                        AssetKeys.SystemUi.Updates);
+
+                _install.Enabled =
+                    true;
+            }
+            else if (status != null &&
+                (
+                    status.Kind ==
+                        PackageStatusKind.DifferentBuild ||
+                    status.Kind ==
+                        PackageStatusKind.Modified
+                ))
+            {
+                _install.Visible =
+                    true;
+
+                Theme.StyleActionButton(
+                    _install,
+                    Color.FromArgb(
+                        0x9B,
+                        0x77,
+                        0x48),
+                    Theme.AccentSand);
+
+                _install.Text =
+                    IsRu
+                        ? "Переустановить"
+                        : "Reinstall";
+
+                _install.Image =
+                    UiAssets.SystemIcon(
+                        AssetKeys.SystemUi.Reinstall);
+
+                _install.Enabled =
+                    true;
+            }
+            else
+            {
+                _install.Visible =
+                    canInstall;
+
+                Theme.StyleActionButton(
+                    _install,
+                    Color.FromArgb(
+                        0x9B,
+                        0x77,
+                        0x48),
+                    Theme.AccentSand);
+
+                _install.Text =
+                    IsRu
+                        ? "Установить"
+                        : "Install";
+
+                _install.Image =
+                    UiAssets.SystemIcon(
+                        AssetKeys.SystemUi.Install);
+
+                _install.Enabled =
+                    canInstall;
             }
         }
 
@@ -410,103 +2482,283 @@ namespace StrandedDeepModManager
         {
             get
             {
-                if (_list.SelectedItems.Count != 1)
-                    return null;
-
-                return _list.SelectedItems[0].Tag as PackageStatus;
+                return _selected;
             }
         }
 
-        private void ShowSelectedDetails()
+        private void ShowManageMenu()
         {
-            PackageStatus status = SelectedStatus;
+            PackageStatus status =
+                SelectedStatus;
 
-            if (status == null)
+            if (status == null ||
+                _engine == null)
             {
-                _details.Text =
-                    "Select a package.\r\n\r\n" +
-                    "v0.2 uses the verified public stable catalog and GitHub Release packages.\r\n" +
-                    "Downloaded packages and product pages are cached under LocalAppData.";
-                _install.Enabled = false;
-                _uninstall.Enabled = false;
                 return;
             }
 
-            CatalogPackage p = status.CatalogPackage;
-            StringBuilder text = new StringBuilder();
+            ContextMenuStrip menu =
+                new ContextMenuStrip();
 
-            text.AppendLine(p.name);
-            text.AppendLine("ID: " + p.id);
-            text.AppendLine("Available: " + (p.latest == null ? "" : p.latest.version));
-            text.AppendLine("Installed: " + (status.InstalledVersion ?? "-"));
-            text.AppendLine("Status: " + StatusText(status.Kind));
-            text.AppendLine("Category: " + (p.category ?? ""));
-            text.AppendLine("Cached ZIP: " + (status.PackageZipPath ?? "<not available>"));
-            text.AppendLine();
-            text.AppendLine("Runtime status:");
-            text.AppendLine(status.Detail ?? "");
-            text.AppendLine();
+            menu.BackColor =
+                Theme.PanelRaised;
 
-            if (p.page == null)
+            menu.ForeColor =
+                Theme.TextPrimary;
+
+            menu.Font =
+                Theme.UiFont(
+                    9F,
+                    FontStyle.Regular);
+
+            ToolStripMenuItem reinstall =
+                new ToolStripMenuItem(
+                    IsRu
+                        ? "Переустановить"
+                        : "Reinstall");
+
+            reinstall.Image =
+                UiAssets.SystemIcon(
+                    AssetKeys.SystemUi.Reinstall);
+
+            reinstall.Click += delegate
             {
-                text.AppendLine("Product page: catalog fallback only");
-                text.AppendLine();
-                text.AppendLine(p.description ?? "");
-            }
-            else if (LoadedPageMatches(p, CurrentLocaleCode))
+                InstallSelected();
+            };
+
+            ToolStripMenuItem uninstall =
+                new ToolStripMenuItem(
+                    IsRu
+                        ? "Удалить мод"
+                        : "Uninstall mod");
+
+            uninstall.Image =
+                UiAssets.SystemIcon(
+                    AssetKeys.SystemUi.Uninstall);
+
+            uninstall.ForeColor =
+                Theme.Error;
+
+            uninstall.Click += delegate
             {
-                AppendLoadedPage(text, _loadedPage);
-            }
-            else
+                UninstallSelected();
+            };
+
+            menu.Items.Add(
+                reinstall);
+
+            menu.Items.Add(
+                new ToolStripSeparator());
+
+            menu.Items.Add(
+                uninstall);
+
+            menu.Show(
+                _manage,
+                new Point(
+                    0,
+                    -menu.PreferredSize.Height));
+        }
+        private void InstallSelected()
+        {
+            PackageStatus status =
+                SelectedStatus;
+
+            if (status == null ||
+                _engine == null)
             {
-                bool loading =
-                    _pageWorker.IsBusy &&
-                    String.Equals(
-                        _loadedPagePackageId,
-                        p.id,
-                        StringComparison.Ordinal);
-
-                text.AppendLine(
-                    loading
-                        ? "Product page: loading " + CurrentLocaleCode.ToUpperInvariant() + "..."
-                        : "Product page: waiting for validated content");
-
-                if (!String.IsNullOrWhiteSpace(_pageLoadError))
-                {
-                    text.AppendLine();
-                    text.AppendLine("Page warning:");
-                    text.AppendLine(_pageLoadError);
-                    text.AppendLine();
-                    text.AppendLine("Catalog fallback:");
-                }
-
-                text.AppendLine();
-                text.AppendLine(p.description ?? "");
+                return;
             }
 
-            _details.Text = text.ToString();
+            DialogResult answer =
+                MessageBox.Show(
+                    this,
+                    String.Format(
+                        IsRu
+                            ? "Установить или обновить {0}?\r\n\r\nStranded Deep должна быть закрыта. Каталог, SHA-256 пакета, manifest и файлы проверяются до установки."
+                            : "Install/update {0}?\r\n\r\nStranded Deep must be closed. The catalog, package SHA-256, manifest and package files are verified before installation.",
+                        DisplayNames.Mod(status.CatalogPackage.name)),
+                    IsRu
+                        ? "Подтверждение"
+                        : "Confirm install",
+                    MessageBoxButtons.OKCancel,
+                    MessageBoxIcon.Question);
 
-            _install.Enabled =
-                status.Kind == PackageStatusKind.NotInstalled ||
-                status.Kind == PackageStatusKind.UpdateAvailable ||
-                status.Kind == PackageStatusKind.DifferentBuild ||
-                status.Kind == PackageStatusKind.Modified;
+            if (answer !=
+                DialogResult.OK)
+            {
+                return;
+            }
 
-            _uninstall.Enabled =
-                status.Kind == PackageStatusKind.Installed ||
-                status.Kind == PackageStatusKind.UpdateAvailable ||
-                status.Kind == PackageStatusKind.DifferentBuild ||
-                status.Kind == PackageStatusKind.Modified;
+            SetBusy(true);
+
+            try
+            {
+                _engine.InstallOrUpdate(
+                    status.CatalogPackage);
+
+                MessageBox.Show(
+                    this,
+                    IsRu
+                        ? "Установка/обновление завершена."
+                        : "Install/update completed successfully.",
+                    IsRu
+                        ? "Готово"
+                        : "Success",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+
+                RefreshCatalog(false);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    this,
+                    ex.Message,
+                    IsRu
+                        ? "Ошибка установки"
+                        : "Install/update failed",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+
+                RefreshCatalog(false);
+            }
+            finally
+            {
+                SetBusy(false);
+            }
         }
 
-        private string CurrentLocaleCode
+        private void UninstallSelected()
         {
-            get
+            PackageStatus status =
+                SelectedStatus;
+
+            if (status == null ||
+                _engine == null)
             {
-                return _language.SelectedIndex == 1
-                    ? "en"
-                    : "ru";
+                return;
             }
+
+            DialogResult answer =
+                MessageBox.Show(
+                    this,
+                    String.Format(
+                        IsRu
+                            ? "Удалить {0}?\r\n\r\nБудут удалены только пути, принадлежащие этому пакету. Persistent save/config data не удаляются."
+                            : "Uninstall {0}?\r\n\r\nOnly package-owned runtime paths will be removed. Persistent save/config data is not deleted.",
+                        DisplayNames.Mod(status.CatalogPackage.name)),
+                    IsRu
+                        ? "Подтверждение удаления"
+                        : "Confirm uninstall",
+                    MessageBoxButtons.OKCancel,
+                    MessageBoxIcon.Warning);
+
+            if (answer !=
+                DialogResult.OK)
+            {
+                return;
+            }
+
+            SetBusy(true);
+
+            try
+            {
+                _engine.Uninstall(
+                    status.CatalogPackage);
+
+                MessageBox.Show(
+                    this,
+                    IsRu
+                        ? "Мод удалён."
+                        : "Uninstall completed successfully.",
+                    IsRu
+                        ? "Готово"
+                        : "Success",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+
+                RefreshCatalog(false);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    this,
+                    ex.Message,
+                    IsRu
+                        ? "Ошибка удаления"
+                        : "Uninstall failed",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+
+                RefreshCatalog(false);
+            }
+            finally
+            {
+                SetBusy(false);
+            }
+        }
+
+        private void BeginLoadSelectedPage()
+        {
+            PackageStatus status =
+                SelectedStatus;
+
+            if (status == null ||
+                status.CatalogPackage == null ||
+                status.CatalogPackage.page == null ||
+                _engine == null ||
+                _engine.ModPages == null)
+            {
+                _loadedPage = null;
+                _loadedPagePackageId = null;
+                _loadedPageLocale = null;
+                _pageLoadError = null;
+                return;
+            }
+
+            CatalogPackage package =
+                status.CatalogPackage;
+
+            if (LoadedPageMatches(
+                package,
+                _locale))
+            {
+                return;
+            }
+
+            if (_pageWorker.IsBusy)
+            {
+                _pageReloadPending = true;
+                return;
+            }
+
+            _loadedPage = null;
+            _loadedPagePackageId =
+                package.id;
+
+            _loadedPageLocale =
+                _locale;
+
+            _pageLoadError = null;
+            _pageReloadPending = false;
+
+            ShowSelectedDetails();
+
+            PageLoadRequest request =
+                new PageLoadRequest();
+
+            request.Package =
+                package;
+
+            request.Locale =
+                _locale;
+
+            request.Service =
+                _engine.ModPages;
+
+            _pageWorker.RunWorkerAsync(
+                request);
         }
 
         private bool LoadedPageMatches(
@@ -535,171 +2787,6 @@ namespace StrandedDeepModManager
                     StringComparison.OrdinalIgnoreCase);
         }
 
-        private void AppendLoadedPage(
-            StringBuilder text,
-            ModPageLoadResult page)
-        {
-            text.AppendLine(
-                "Product page source: " +
-                page.SourceKind);
-
-            text.AppendLine(
-                "Page commit: " +
-                page.ActualCommit);
-
-            text.AppendLine(
-                "Locale: " +
-                page.ResolvedLocale.ToUpperInvariant());
-
-            text.AppendLine();
-
-            if (page.Locale != null)
-            {
-                if (!String.IsNullOrWhiteSpace(page.Locale.subtitle))
-                {
-                    text.AppendLine(page.Locale.subtitle);
-                    text.AppendLine();
-                }
-
-                if (!String.IsNullOrWhiteSpace(page.Locale.description))
-                {
-                    text.AppendLine(page.Locale.description);
-                    text.AppendLine();
-                }
-            }
-
-            if (page.Page != null &&
-                page.Page.highlights != null &&
-                page.Page.highlights.Count > 0)
-            {
-                text.AppendLine(
-                    "Highlights: " +
-                    String.Join(
-                        ", ",
-                        page.Page.highlights.ToArray()));
-
-                text.AppendLine();
-            }
-
-            if (page.Locale != null &&
-                page.Locale.features != null)
-            {
-                text.AppendLine(
-                    "Features (" +
-                    page.Locale.features.Count +
-                    "):");
-
-                foreach (string feature
-                    in page.Locale.features)
-                {
-                    text.AppendLine(
-                        "  - " +
-                        feature);
-                }
-
-                text.AppendLine();
-            }
-
-            int faqCount =
-                page.Locale == null ||
-                page.Locale.faq == null
-                    ? 0
-                    : page.Locale.faq.Count;
-
-            int screenshotCount =
-                page.Page == null ||
-                page.Page.media == null ||
-                page.Page.media.screenshots == null
-                    ? 0
-                    : page.Page.media.screenshots.Count;
-
-            text.AppendLine(
-                "FAQ: " +
-                faqCount);
-
-            text.AppendLine(
-                "Screenshots: " +
-                screenshotCount);
-
-            text.AppendLine(
-                "Cover: " +
-                (
-                    !String.IsNullOrWhiteSpace(page.CoverPath) &&
-                    File.Exists(page.CoverPath)
-                        ? "validated cache"
-                        : "not available"));
-
-            if (!String.IsNullOrWhiteSpace(page.Warning))
-            {
-                text.AppendLine();
-                text.AppendLine(
-                    "Cache/network warning: " +
-                    page.Warning);
-            }
-
-            if (!String.IsNullOrWhiteSpace(page.MediaWarning))
-            {
-                text.AppendLine();
-                text.AppendLine(
-                    "Media warning: " +
-                    page.MediaWarning);
-            }
-        }
-
-        private void BeginLoadSelectedPage()
-        {
-            PackageStatus status = SelectedStatus;
-
-            if (status == null ||
-                status.CatalogPackage == null ||
-                status.CatalogPackage.page == null ||
-                _engine == null ||
-                _engine.ModPages == null)
-            {
-                _loadedPage = null;
-                _loadedPagePackageId = null;
-                _loadedPageLocale = null;
-                _pageLoadError = null;
-                return;
-            }
-
-            CatalogPackage package =
-                status.CatalogPackage;
-
-            string locale =
-                CurrentLocaleCode;
-
-            if (LoadedPageMatches(
-                package,
-                locale))
-            {
-                return;
-            }
-
-            if (_pageWorker.IsBusy)
-            {
-                _pageReloadPending = true;
-                return;
-            }
-
-            _loadedPage = null;
-            _loadedPagePackageId = package.id;
-            _loadedPageLocale = locale;
-            _pageLoadError = null;
-            _pageReloadPending = false;
-
-            ShowSelectedDetails();
-
-            PageLoadRequest request =
-                new PageLoadRequest();
-
-            request.Package = package;
-            request.Locale = locale;
-            request.Service = _engine.ModPages;
-
-            _pageWorker.RunWorkerAsync(request);
-        }
-
         private void PageWorkerDoWork(
             object sender,
             DoWorkEventArgs e)
@@ -710,7 +2797,8 @@ namespace StrandedDeepModManager
             PageLoadOutcome outcome =
                 new PageLoadOutcome();
 
-            outcome.Request = request;
+            outcome.Request =
+                request;
 
             try
             {
@@ -718,7 +2806,7 @@ namespace StrandedDeepModManager
                     request.Service == null)
                 {
                     throw new InvalidOperationException(
-                        "Mod-page load request is invalid.");
+                        "Invalid mod-page load request.");
                 }
 
                 outcome.Result =
@@ -731,7 +2819,8 @@ namespace StrandedDeepModManager
                 outcome.Error = ex;
             }
 
-            e.Result = outcome;
+            e.Result =
+                outcome;
         }
 
         private void PageWorkerCompleted(
@@ -741,16 +2830,10 @@ namespace StrandedDeepModManager
             PageLoadOutcome outcome =
                 e.Result as PageLoadOutcome;
 
-            if (e.Error != null)
-            {
-                _pageLoadError =
-                    e.Error.Message;
-            }
-
             PackageStatus selected =
                 SelectedStatus;
 
-            bool matchesCurrent =
+            bool matches =
                 outcome != null &&
                 outcome.Request != null &&
                 selected != null &&
@@ -765,12 +2848,24 @@ namespace StrandedDeepModManager
                     StringComparison.Ordinal) &&
                 String.Equals(
                     outcome.Request.Locale,
-                    CurrentLocaleCode,
+                    _locale,
                     StringComparison.OrdinalIgnoreCase);
 
-            if (matchesCurrent)
+            if (matches)
             {
-                if (outcome.Error == null)
+                if (e.Error != null)
+                {
+                    _loadedPage = null;
+                    _pageLoadError =
+                        e.Error.Message;
+                }
+                else if (outcome.Error != null)
+                {
+                    _loadedPage = null;
+                    _pageLoadError =
+                        outcome.Error.Message;
+                }
+                else
                 {
                     _loadedPage =
                         outcome.Result;
@@ -783,12 +2878,6 @@ namespace StrandedDeepModManager
 
                     _pageLoadError = null;
                 }
-                else
-                {
-                    _loadedPage = null;
-                    _pageLoadError =
-                        outcome.Error.Message;
-                }
 
                 ShowSelectedDetails();
             }
@@ -796,130 +2885,71 @@ namespace StrandedDeepModManager
             bool reload =
                 _pageReloadPending;
 
-            _pageReloadPending = false;
+            _pageReloadPending =
+                false;
 
             if (reload)
                 BeginLoadSelectedPage();
         }
 
-        private void InstallSelected()
-        {
-            PackageStatus status = SelectedStatus;
-            if (status == null || _engine == null)
-                return;
-
-            DialogResult answer = MessageBox.Show(
-                this,
-                "Install/update " + status.CatalogPackage.name + "?\r\n\r\n" +
-                "Stranded Deep must be closed. The catalog, package SHA-256, manifest and package files are verified before installation.",
-                "Confirm install",
-                MessageBoxButtons.OKCancel,
-                MessageBoxIcon.Question);
-
-            if (answer != DialogResult.OK)
-                return;
-
-            SetBusy(true);
-
-            try
-            {
-                _engine.InstallOrUpdate(status.CatalogPackage);
-                MessageBox.Show(
-                    this,
-                    "Install/update completed successfully.",
-                    "Success",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-
-                RefreshCatalog(false);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(
-                    this,
-                    ex.Message,
-                    "Install/update failed",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
-
-                RefreshCatalog(false);
-            }
-            finally
-            {
-                SetBusy(false);
-            }
-        }
-
-        private void UninstallSelected()
-        {
-            PackageStatus status = SelectedStatus;
-            if (status == null || _engine == null)
-                return;
-
-            DialogResult answer = MessageBox.Show(
-                this,
-                "Uninstall " + status.CatalogPackage.name + "?\r\n\r\n" +
-                "Only package-owned runtime paths will be removed. Persistent save/config data is not deleted.",
-                "Confirm uninstall",
-                MessageBoxButtons.OKCancel,
-                MessageBoxIcon.Warning);
-
-            if (answer != DialogResult.OK)
-                return;
-
-            SetBusy(true);
-
-            try
-            {
-                _engine.Uninstall(status.CatalogPackage);
-                MessageBox.Show(
-                    this,
-                    "Uninstall completed successfully.",
-                    "Success",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
-
-                RefreshCatalog(false);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(
-                    this,
-                    ex.Message,
-                    "Uninstall failed",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
-
-                RefreshCatalog(false);
-            }
-            finally
-            {
-                SetBusy(false);
-            }
-        }
-
         private void ShowNoGameMessage()
         {
+            _catalogStatus.Text =
+                IsRu
+                    ? "Не выбрана папка игры"
+                    : "Game directory not configured";
+
             _details.Text =
-                "Stranded Deep was not found automatically.\r\n\r\n" +
-                "Use Auto-detect or Browse... to select the game directory.";
-            _catalogStatus.Text = "Catalog: waiting for game directory";
-            _install.Enabled = false;
-            _uninstall.Enabled = false;
+                IsRu
+                    ? "Stranded Deep не найдена автоматически.\r\n\r\nОткройте Настройки и выберите папку игры."
+                    : "Stranded Deep was not found automatically.\r\n\r\nOpen Settings and select the game directory.";
+
+            _selectedTitle.Text =
+                IsRu
+                    ? "Требуется настройка"
+                    : "Setup required";
+
+            _selectedSubtitle.Text =
+                IsRu
+                    ? "Укажите папку Stranded Deep."
+                    : "Select the Stranded Deep game directory.";
+
+            _selectedStatus.Text = "";
+
+            UpdateActionButtons();
         }
 
-        private void SetBusy(bool busy)
+        private void SetBusy(
+            bool busy)
         {
-            UseWaitCursor = busy;
-            _refresh.Enabled = !busy;
-            _browseGame.Enabled = !busy;
-            _detectGame.Enabled = !busy;
-            _list.Enabled = !busy;
+            UseWaitCursor =
+                busy;
+
+            _refresh.Enabled =
+                !busy;
+
+            _settings.Enabled =
+                !busy;
+
+            _navAll.Enabled =
+                !busy;
+
+            _navInstalled.Enabled =
+                !busy;
+
+            _navUpdates.Enabled =
+                !busy;
+
+            _search.Enabled =
+                !busy;
+
+            _modList.Enabled =
+                !busy;
 
             if (busy)
             {
                 _install.Enabled = false;
-                _uninstall.Enabled = false;
+                _manage.Enabled = false;
             }
             else
             {
@@ -927,6 +2957,24 @@ namespace StrandedDeepModManager
             }
 
             Application.DoEvents();
+        }
+
+        private static bool ContainsIgnoreCase(
+            string value,
+            string query)
+        {
+            if (String.IsNullOrEmpty(
+                value) ||
+                String.IsNullOrEmpty(
+                    query))
+            {
+                return false;
+            }
+
+            return
+                value.IndexOf(
+                    query,
+                    StringComparison.OrdinalIgnoreCase) >= 0;
         }
     }
 }
