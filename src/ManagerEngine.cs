@@ -8,6 +8,7 @@ using System.Linq;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using StrandedDeepModManager.Content;
 
 namespace StrandedDeepModManager
 {
@@ -20,6 +21,8 @@ namespace StrandedDeepModManager
         public bool CatalogLoadedFromCache { get; private set; }
 
         public CatalogRoot Catalog { get; private set; }
+        public PageCache PageCache { get; private set; }
+        public ModPageService ModPages { get; private set; }
 
         public ManagerEngine(string gameRoot, string catalogUrl)
         {
@@ -32,6 +35,9 @@ namespace StrandedDeepModManager
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "BamEx",
                 "StrandedDeepModManager");
+
+            PageCache = new PageCache(DataRoot);
+            ModPages = new ModPageService(PageCache);
         }
 
         public void LoadCatalog()

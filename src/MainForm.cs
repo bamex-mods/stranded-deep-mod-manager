@@ -1,9 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Windows.Forms;
+using StrandedDeepModManager.Content;
 
 namespace StrandedDeepModManager
 {
@@ -20,9 +23,31 @@ namespace StrandedDeepModManager
         private readonly TextBox _details = new TextBox();
         private readonly Label _summary = new Label();
         private readonly Label _catalogStatus = new Label();
+        private readonly ComboBox _language = new ComboBox();
+        private readonly BackgroundWorker _pageWorker = new BackgroundWorker();
 
         private ManagerEngine _engine;
         private IList<PackageStatus> _statuses = new List<PackageStatus>();
+
+        private ModPageLoadResult _loadedPage;
+        private string _loadedPagePackageId;
+        private string _loadedPageLocale;
+        private string _pageLoadError;
+        private bool _pageReloadPending;
+
+        private sealed class PageLoadRequest
+        {
+            public CatalogPackage Package;
+            public string Locale;
+            public ModPageService Service;
+        }
+
+        private sealed class PageLoadOutcome
+        {
+            public PageLoadRequest Request;
+            public ModPageLoadResult Result;
+            public Exception Error;
+        }
 
         private string SettingsPath
         {
@@ -43,6 +68,9 @@ namespace StrandedDeepModManager
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize = new Size(980, 620);
             Size = new Size(1180, 760);
+
+            _pageWorker.DoWork += PageWorkerDoWork;
+            _pageWorker.RunWorkerCompleted += PageWorkerCompleted;
 
             BuildUi();
             LoadSettings();
@@ -133,12 +161,30 @@ namespace StrandedDeepModManager
             _uninstall.AutoSize = true;
             _uninstall.Click += delegate { UninstallSelected(); };
 
+            Label languageLabel = new Label();
+            languageLabel.Text = "Page:";
+            languageLabel.AutoSize = true;
+            languageLabel.Margin = new Padding(18, 7, 3, 0);
+
+            _language.DropDownStyle = ComboBoxStyle.DropDownList;
+            _language.Width = 64;
+            _language.Items.Add("RU");
+            _language.Items.Add("EN");
+            _language.SelectedIndex = 0;
+            _language.SelectedIndexChanged += delegate
+            {
+                ShowSelectedDetails();
+                BeginLoadSelectedPage();
+            };
+
             _summary.AutoSize = true;
             _summary.Margin = new Padding(18, 7, 0, 0);
 
             toolbar.Controls.Add(_refresh);
             toolbar.Controls.Add(_install);
             toolbar.Controls.Add(_uninstall);
+            toolbar.Controls.Add(languageLabel);
+            toolbar.Controls.Add(_language);
             toolbar.Controls.Add(_summary);
 
             root.Controls.Add(toolbar, 0, 2);
@@ -154,7 +200,11 @@ namespace StrandedDeepModManager
             _list.Columns.Add("Installed", 90);
             _list.Columns.Add("Status", 160);
             _list.Columns.Add("Category", 120);
-            _list.SelectedIndexChanged += delegate { ShowSelectedDetails(); };
+            _list.SelectedIndexChanged += delegate
+            {
+                ShowSelectedDetails();
+                BeginLoadSelectedPage();
+            };
 
             root.Controls.Add(_list, 0, 3);
 
@@ -376,24 +426,65 @@ namespace StrandedDeepModManager
                 _details.Text =
                     "Select a package.\r\n\r\n" +
                     "v0.2 uses the verified public stable catalog and GitHub Release packages.\r\n" +
-                    "Downloaded packages are cached under LocalAppData.";
+                    "Downloaded packages and product pages are cached under LocalAppData.";
                 _install.Enabled = false;
                 _uninstall.Enabled = false;
                 return;
             }
 
             CatalogPackage p = status.CatalogPackage;
+            StringBuilder text = new StringBuilder();
 
-            _details.Text =
-                p.name + "\r\n" +
-                "ID: " + p.id + "\r\n" +
-                "Available: " + (p.latest == null ? "" : p.latest.version) + "\r\n" +
-                "Installed: " + (status.InstalledVersion ?? "-") + "\r\n" +
-                "Status: " + StatusText(status.Kind) + "\r\n" +
-                "Category: " + (p.category ?? "") + "\r\n" +
-                "Cached ZIP: " + (status.PackageZipPath ?? "<not available>") + "\r\n\r\n" +
-                (p.description ?? "") + "\r\n\r\n" +
-                status.Detail;
+            text.AppendLine(p.name);
+            text.AppendLine("ID: " + p.id);
+            text.AppendLine("Available: " + (p.latest == null ? "" : p.latest.version));
+            text.AppendLine("Installed: " + (status.InstalledVersion ?? "-"));
+            text.AppendLine("Status: " + StatusText(status.Kind));
+            text.AppendLine("Category: " + (p.category ?? ""));
+            text.AppendLine("Cached ZIP: " + (status.PackageZipPath ?? "<not available>"));
+            text.AppendLine();
+            text.AppendLine("Runtime status:");
+            text.AppendLine(status.Detail ?? "");
+            text.AppendLine();
+
+            if (p.page == null)
+            {
+                text.AppendLine("Product page: catalog fallback only");
+                text.AppendLine();
+                text.AppendLine(p.description ?? "");
+            }
+            else if (LoadedPageMatches(p, CurrentLocaleCode))
+            {
+                AppendLoadedPage(text, _loadedPage);
+            }
+            else
+            {
+                bool loading =
+                    _pageWorker.IsBusy &&
+                    String.Equals(
+                        _loadedPagePackageId,
+                        p.id,
+                        StringComparison.Ordinal);
+
+                text.AppendLine(
+                    loading
+                        ? "Product page: loading " + CurrentLocaleCode.ToUpperInvariant() + "..."
+                        : "Product page: waiting for validated content");
+
+                if (!String.IsNullOrWhiteSpace(_pageLoadError))
+                {
+                    text.AppendLine();
+                    text.AppendLine("Page warning:");
+                    text.AppendLine(_pageLoadError);
+                    text.AppendLine();
+                    text.AppendLine("Catalog fallback:");
+                }
+
+                text.AppendLine();
+                text.AppendLine(p.description ?? "");
+            }
+
+            _details.Text = text.ToString();
 
             _install.Enabled =
                 status.Kind == PackageStatusKind.NotInstalled ||
@@ -406,6 +497,309 @@ namespace StrandedDeepModManager
                 status.Kind == PackageStatusKind.UpdateAvailable ||
                 status.Kind == PackageStatusKind.DifferentBuild ||
                 status.Kind == PackageStatusKind.Modified;
+        }
+
+        private string CurrentLocaleCode
+        {
+            get
+            {
+                return _language.SelectedIndex == 1
+                    ? "en"
+                    : "ru";
+            }
+        }
+
+        private bool LoadedPageMatches(
+            CatalogPackage package,
+            string locale)
+        {
+            if (_loadedPage == null ||
+                package == null ||
+                package.page == null)
+            {
+                return false;
+            }
+
+            return
+                String.Equals(
+                    _loadedPagePackageId,
+                    package.id,
+                    StringComparison.Ordinal) &&
+                String.Equals(
+                    _loadedPageLocale,
+                    locale,
+                    StringComparison.OrdinalIgnoreCase) &&
+                String.Equals(
+                    _loadedPage.RequestedCommit,
+                    package.page.commit,
+                    StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void AppendLoadedPage(
+            StringBuilder text,
+            ModPageLoadResult page)
+        {
+            text.AppendLine(
+                "Product page source: " +
+                page.SourceKind);
+
+            text.AppendLine(
+                "Page commit: " +
+                page.ActualCommit);
+
+            text.AppendLine(
+                "Locale: " +
+                page.ResolvedLocale.ToUpperInvariant());
+
+            text.AppendLine();
+
+            if (page.Locale != null)
+            {
+                if (!String.IsNullOrWhiteSpace(page.Locale.subtitle))
+                {
+                    text.AppendLine(page.Locale.subtitle);
+                    text.AppendLine();
+                }
+
+                if (!String.IsNullOrWhiteSpace(page.Locale.description))
+                {
+                    text.AppendLine(page.Locale.description);
+                    text.AppendLine();
+                }
+            }
+
+            if (page.Page != null &&
+                page.Page.highlights != null &&
+                page.Page.highlights.Count > 0)
+            {
+                text.AppendLine(
+                    "Highlights: " +
+                    String.Join(
+                        ", ",
+                        page.Page.highlights.ToArray()));
+
+                text.AppendLine();
+            }
+
+            if (page.Locale != null &&
+                page.Locale.features != null)
+            {
+                text.AppendLine(
+                    "Features (" +
+                    page.Locale.features.Count +
+                    "):");
+
+                foreach (string feature
+                    in page.Locale.features)
+                {
+                    text.AppendLine(
+                        "  - " +
+                        feature);
+                }
+
+                text.AppendLine();
+            }
+
+            int faqCount =
+                page.Locale == null ||
+                page.Locale.faq == null
+                    ? 0
+                    : page.Locale.faq.Count;
+
+            int screenshotCount =
+                page.Page == null ||
+                page.Page.media == null ||
+                page.Page.media.screenshots == null
+                    ? 0
+                    : page.Page.media.screenshots.Count;
+
+            text.AppendLine(
+                "FAQ: " +
+                faqCount);
+
+            text.AppendLine(
+                "Screenshots: " +
+                screenshotCount);
+
+            text.AppendLine(
+                "Cover: " +
+                (
+                    !String.IsNullOrWhiteSpace(page.CoverPath) &&
+                    File.Exists(page.CoverPath)
+                        ? "validated cache"
+                        : "not available"));
+
+            if (!String.IsNullOrWhiteSpace(page.Warning))
+            {
+                text.AppendLine();
+                text.AppendLine(
+                    "Cache/network warning: " +
+                    page.Warning);
+            }
+
+            if (!String.IsNullOrWhiteSpace(page.MediaWarning))
+            {
+                text.AppendLine();
+                text.AppendLine(
+                    "Media warning: " +
+                    page.MediaWarning);
+            }
+        }
+
+        private void BeginLoadSelectedPage()
+        {
+            PackageStatus status = SelectedStatus;
+
+            if (status == null ||
+                status.CatalogPackage == null ||
+                status.CatalogPackage.page == null ||
+                _engine == null ||
+                _engine.ModPages == null)
+            {
+                _loadedPage = null;
+                _loadedPagePackageId = null;
+                _loadedPageLocale = null;
+                _pageLoadError = null;
+                return;
+            }
+
+            CatalogPackage package =
+                status.CatalogPackage;
+
+            string locale =
+                CurrentLocaleCode;
+
+            if (LoadedPageMatches(
+                package,
+                locale))
+            {
+                return;
+            }
+
+            if (_pageWorker.IsBusy)
+            {
+                _pageReloadPending = true;
+                return;
+            }
+
+            _loadedPage = null;
+            _loadedPagePackageId = package.id;
+            _loadedPageLocale = locale;
+            _pageLoadError = null;
+            _pageReloadPending = false;
+
+            ShowSelectedDetails();
+
+            PageLoadRequest request =
+                new PageLoadRequest();
+
+            request.Package = package;
+            request.Locale = locale;
+            request.Service = _engine.ModPages;
+
+            _pageWorker.RunWorkerAsync(request);
+        }
+
+        private void PageWorkerDoWork(
+            object sender,
+            DoWorkEventArgs e)
+        {
+            PageLoadRequest request =
+                e.Argument as PageLoadRequest;
+
+            PageLoadOutcome outcome =
+                new PageLoadOutcome();
+
+            outcome.Request = request;
+
+            try
+            {
+                if (request == null ||
+                    request.Service == null)
+                {
+                    throw new InvalidOperationException(
+                        "Mod-page load request is invalid.");
+                }
+
+                outcome.Result =
+                    request.Service.Load(
+                        request.Package,
+                        request.Locale);
+            }
+            catch (Exception ex)
+            {
+                outcome.Error = ex;
+            }
+
+            e.Result = outcome;
+        }
+
+        private void PageWorkerCompleted(
+            object sender,
+            RunWorkerCompletedEventArgs e)
+        {
+            PageLoadOutcome outcome =
+                e.Result as PageLoadOutcome;
+
+            if (e.Error != null)
+            {
+                _pageLoadError =
+                    e.Error.Message;
+            }
+
+            PackageStatus selected =
+                SelectedStatus;
+
+            bool matchesCurrent =
+                outcome != null &&
+                outcome.Request != null &&
+                selected != null &&
+                selected.CatalogPackage != null &&
+                _engine != null &&
+                Object.ReferenceEquals(
+                    outcome.Request.Service,
+                    _engine.ModPages) &&
+                String.Equals(
+                    outcome.Request.Package.id,
+                    selected.CatalogPackage.id,
+                    StringComparison.Ordinal) &&
+                String.Equals(
+                    outcome.Request.Locale,
+                    CurrentLocaleCode,
+                    StringComparison.OrdinalIgnoreCase);
+
+            if (matchesCurrent)
+            {
+                if (outcome.Error == null)
+                {
+                    _loadedPage =
+                        outcome.Result;
+
+                    _loadedPagePackageId =
+                        selected.CatalogPackage.id;
+
+                    _loadedPageLocale =
+                        outcome.Request.Locale;
+
+                    _pageLoadError = null;
+                }
+                else
+                {
+                    _loadedPage = null;
+                    _pageLoadError =
+                        outcome.Error.Message;
+                }
+
+                ShowSelectedDetails();
+            }
+
+            bool reload =
+                _pageReloadPending;
+
+            _pageReloadPending = false;
+
+            if (reload)
+                BeginLoadSelectedPage();
         }
 
         private void InstallSelected()
