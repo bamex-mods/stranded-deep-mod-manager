@@ -26,6 +26,7 @@ $Sources = @(
     Join-Path $Src "GameLocator.cs"
     Join-Path $Src "Content\ModPageModels.cs"
     Join-Path $Src "Content\PageCache.cs"
+    Join-Path $Src "Content\ModPageService.cs"
     Join-Path $Src "ManagerEngine.cs"
     Join-Path $Src "MainForm.cs"
 )

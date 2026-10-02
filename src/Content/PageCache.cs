@@ -326,7 +326,15 @@ namespace StrandedDeepModManager.Content
                 Directory.CreateDirectory(dir);
 
             if (File.Exists(destination))
-                File.Delete(destination);
+            {
+                File.Replace(
+                    source,
+                    destination,
+                    null,
+                    true);
+
+                return;
+            }
 
             File.Move(source, destination);
         }
