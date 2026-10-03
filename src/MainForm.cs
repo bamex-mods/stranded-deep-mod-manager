@@ -91,6 +91,8 @@ namespace StrandedDeepModManager
         private readonly RichTextBox _details =
             new RichTextBox();
 
+        private ModDetailsControl _modDetails;
+
         private readonly Button _install =
             new Button();
 
@@ -1190,290 +1192,27 @@ namespace StrandedDeepModManager
         private void BuildRightStageOne(
             Panel parent)
         {
-            Panel header =
-                new Panel();
-
-            header.Dock =
-                DockStyle.Top;
-
-            header.Height = 96;
-
-            header.BackColor =
-                Theme.PanelRaised;
-
-            TableLayoutPanel headerLayout =
-                new TableLayoutPanel();
-
-            headerLayout.Dock =
-                DockStyle.Fill;
-
-            headerLayout.BackColor =
-                Theme.PanelRaised;
-
-            headerLayout.Padding =
-                new Padding(
-                    14,
-                    10,
-                    14,
-                    10);
-
-            headerLayout.ColumnCount = 3;
-
-            headerLayout.ColumnStyles.Add(
-                new ColumnStyle(
-                    SizeType.Absolute,
-                    76F));
-
-            headerLayout.ColumnStyles.Add(
-                new ColumnStyle(
-                    SizeType.Percent,
-                    100F));
-
-            headerLayout.ColumnStyles.Add(
-                new ColumnStyle(
-                    SizeType.Absolute,
-                    142F));
-
-            headerLayout.RowCount = 2;
-
-            headerLayout.RowStyles.Add(
-                new RowStyle(
-                    SizeType.Percent,
-                    45F));
-
-            headerLayout.RowStyles.Add(
-                new RowStyle(
-                    SizeType.Percent,
-                    55F));
-
-            _selectedIdentity.Dock =
-                DockStyle.Fill;
-
-            _selectedIdentity.Margin =
-                new Padding(
-                    0,
-                    0,
-                    10,
-                    0);
-
-            _selectedIdentity.SizeMode =
-                PictureBoxSizeMode.Zoom;
-
-            _selectedIdentity.BackColor =
-                Color.Transparent;
-
-            _selectedTitle.Dock =
-                DockStyle.Fill;
-
-            _selectedTitle.Margin =
-                new Padding(
-                    0,
-                    1,
-                    8,
-                    0);
-
-            _selectedTitle.ForeColor =
-                Theme.TextPrimary;
-
-            _selectedTitle.Font =
-                Theme.UiFont(
-                    15F,
-                    FontStyle.Bold);
-
-            _selectedTitle.TextAlign =
-                ContentAlignment.BottomLeft;
-
-            _selectedTitle.AutoEllipsis =
-                true;
-
-            _selectedSubtitle.Dock =
-                DockStyle.Fill;
-
-            _selectedSubtitle.Margin =
-                new Padding(
-                    0,
-                    2,
-                    8,
-                    0);
-
-            _selectedSubtitle.ForeColor =
-                Theme.TextSecondary;
-
-            _selectedSubtitle.Font =
-                Theme.UiFont(
-                    9F,
-                    FontStyle.Regular);
-
-            _selectedSubtitle.TextAlign =
-                ContentAlignment.TopLeft;
-
-            _selectedSubtitle.AutoEllipsis =
-                true;
-
-            _selectedStatus.Dock =
-                DockStyle.Fill;
-
-            _selectedStatus.Margin =
-                new Padding(
-                    8,
-                    13,
-                    0,
-                    13);
-
-            _selectedStatus.TextAlign =
-                ContentAlignment.MiddleCenter;
-
-            _selectedStatus.ForeColor =
-                Theme.TextPrimary;
-
-            _selectedStatus.Font =
-                Theme.UiFont(
-                    8.5F,
-                    FontStyle.Regular);
-
-            headerLayout.Controls.Add(
-                _selectedIdentity,
-                0,
-                0);
-
-            headerLayout.SetRowSpan(
-                _selectedIdentity,
-                2);
-
-            headerLayout.Controls.Add(
-                _selectedTitle,
-                1,
-                0);
-
-            headerLayout.Controls.Add(
-                _selectedSubtitle,
-                1,
-                1);
-
-            headerLayout.Controls.Add(
-                _selectedStatus,
-                2,
-                0);
-
-            headerLayout.SetRowSpan(
-                _selectedStatus,
-                2);
-
-            header.Controls.Add(
-                headerLayout);
-
-            parent.Controls.Add(
-                header);
-
-            Panel actions =
-                new Panel();
-
-            actions.Dock =
-                DockStyle.Bottom;
-
-            actions.Height = 66;
-
-            actions.BackColor =
-                Theme.PanelRaised;
-
-            actions.Padding =
-                new Padding(
-                    12,
-                    12,
-                    12,
-                    10);
-
-            _manage.Dock =
-                DockStyle.Right;
-
-            _manage.Width = 170;
-
-            _manage.Margin =
-                new Padding(
-                    8,
-                    0,
-                    0,
-                    0);
-
-            _manage.Image =
-                UiAssets.SystemIcon(
-                    AssetKeys.SystemUi.Manage);
+            _install.Click += delegate
+            {
+                InstallSelected();
+            };
 
             _manage.Click += delegate
             {
                 ShowManageMenu();
             };
 
-            Theme.StyleActionButton(
-                _manage,
-                Color.FromArgb(
-                    0x36,
-                    0x31,
-                    0x29),
-                Theme.AccentSand);
-
-            _install.Dock =
-                DockStyle.Right;
-
-            _install.Width = 190;
-
-            _install.Margin =
-                new Padding(
-                    8,
-                    0,
-                    0,
-                    0);
-
-            _install.Click += delegate
-            {
-                InstallSelected();
-            };
-
-            Theme.StyleActionButton(
-                _install,
-                Theme.UpdateBlue,
-                Theme.AccentCyan);
-
-            actions.Controls.Add(
-                _manage);
-
-            actions.Controls.Add(
-                _install);
+            _modDetails =
+                new ModDetailsControl(
+                    _selectedIdentity,
+                    _selectedTitle,
+                    _selectedSubtitle,
+                    _selectedStatus,
+                    _install,
+                    _manage);
 
             parent.Controls.Add(
-                actions);
-
-            _details.Dock =
-                DockStyle.Fill;
-
-            _details.ReadOnly = true;
-            _details.BorderStyle =
-                BorderStyle.None;
-
-            _details.BackColor =
-                Theme.Panel;
-
-            _details.ForeColor =
-                Theme.TextPrimary;
-
-            _details.Font =
-                Theme.UiFont(
-                    9.25F,
-                    FontStyle.Regular);
-
-            _details.ScrollBars =
-                RichTextBoxScrollBars.Vertical;
-
-            _details.DetectUrls =
-                false;
-
-            _details.Margin =
-                new Padding(0);
-
-            parent.Controls.Add(
-                _details);
-
-            _details.BringToFront();
+                _modDetails);
         }
 
         private void LoadSettings()
@@ -2069,6 +1808,7 @@ namespace StrandedDeepModManager
                         : "The Manager uses the verified public stable catalog and GitHub Releases.";
 
                 UpdateActionButtons();
+                UpdateProductView();
                 return;
             }
 
@@ -2189,8 +1929,60 @@ namespace StrandedDeepModManager
                 text.ToString();
 
             UpdateActionButtons();
+            UpdateProductView();
         }
 
+        private void UpdateProductView()
+        {
+            if (_modDetails == null)
+                return;
+
+            PackageStatus status =
+                SelectedStatus;
+
+            if (status == null ||
+                status.CatalogPackage == null)
+            {
+                _modDetails.Bind(
+                    null,
+                    null,
+                    _locale,
+                    null,
+                    false,
+                    null);
+
+                return;
+            }
+
+            CatalogPackage package =
+                status.CatalogPackage;
+
+            ModPageLoadResult page =
+                LoadedPageMatches(
+                    package,
+                    _locale)
+                    ? _loadedPage
+                    : null;
+
+            bool loading =
+                package.page != null &&
+                page == null &&
+                String.IsNullOrWhiteSpace(
+                    _pageLoadError);
+
+            ModPageService service =
+                _engine == null
+                    ? null
+                    : _engine.ModPages;
+
+            _modDetails.Bind(
+                status,
+                page,
+                _locale,
+                service,
+                loading,
+                _pageLoadError);
+        }
         private void AppendLoadedPage(
             StringBuilder text,
             ModPageLoadResult page)
@@ -2500,16 +2292,8 @@ namespace StrandedDeepModManager
             ContextMenuStrip menu =
                 new ContextMenuStrip();
 
-            menu.BackColor =
-                Theme.PanelRaised;
-
-            menu.ForeColor =
-                Theme.TextPrimary;
-
-            menu.Font =
-                Theme.UiFont(
-                    9F,
-                    FontStyle.Regular);
+            DarkMenus.Style(
+                menu);
 
             ToolStripMenuItem reinstall =
                 new ToolStripMenuItem(
@@ -2517,9 +2301,11 @@ namespace StrandedDeepModManager
                         ? "Переустановить"
                         : "Reinstall");
 
-            reinstall.Image =
+            DarkMenus.StyleItem(
+                reinstall,
                 UiAssets.SystemIcon(
-                    AssetKeys.SystemUi.Reinstall);
+                    AssetKeys.SystemUi.Reinstall),
+                false);
 
             reinstall.Click += delegate
             {
@@ -2532,12 +2318,11 @@ namespace StrandedDeepModManager
                         ? "Удалить мод"
                         : "Uninstall mod");
 
-            uninstall.Image =
+            DarkMenus.StyleItem(
+                uninstall,
                 UiAssets.SystemIcon(
-                    AssetKeys.SystemUi.Uninstall);
-
-            uninstall.ForeColor =
-                Theme.Error;
+                    AssetKeys.SystemUi.Uninstall),
+                true);
 
             uninstall.Click += delegate
             {
@@ -2548,7 +2333,7 @@ namespace StrandedDeepModManager
                 reinstall);
 
             menu.Items.Add(
-                new ToolStripSeparator());
+                DarkMenus.Separator());
 
             menu.Items.Add(
                 uninstall);
@@ -2556,7 +2341,8 @@ namespace StrandedDeepModManager
             menu.Show(
                 _manage,
                 new Point(
-                    0,
+                    _manage.Width -
+                    menu.PreferredSize.Width,
                     -menu.PreferredSize.Height));
         }
         private void InstallSelected()
@@ -2917,6 +2703,7 @@ namespace StrandedDeepModManager
             _selectedStatus.Text = "";
 
             UpdateActionButtons();
+            UpdateProductView();
         }
 
         private void SetBusy(
