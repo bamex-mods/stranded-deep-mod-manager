@@ -1,5 +1,5 @@
-param(
-    [string]$CatalogPath = "F:\mod-work\stranded-deep-mod-catalog\stable\catalog.json"
+﻿param(
+    [string]$CatalogPath = (Join-Path (Split-Path -Parent $PSScriptRoot) "stranded-deep-mod-catalog\stable\catalog.json")
 )
 
 $ErrorActionPreference = "Stop"
