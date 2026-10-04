@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -218,6 +218,8 @@ namespace StrandedDeepModManager
                 : inspection.Manifest.ownedPaths;
 
             string backupRoot = null;
+            bool removalStarted = false;
+            bool installCopyStarted = false;
 
             try
             {
@@ -228,11 +230,13 @@ namespace StrandedDeepModManager
                     backupRoot = CreateBackup(package.id, removalPaths, inspection.Manifest.persistence);
                 }
 
+                removalStarted = true;
                 RemoveOwnedPaths(removalPaths);
 
                 string temp = ExtractPackageSafely(zip);
                 try
                 {
+                    installCopyStarted = true;
                     CopyInstallPayload(temp);
                 }
                 finally
@@ -244,15 +248,18 @@ namespace StrandedDeepModManager
             }
             catch
             {
-                try
+                if (installCopyStarted)
                 {
-                    RemoveOwnedPaths(inspection.Manifest.ownedPaths);
-                }
-                catch
-                {
+                    try
+                    {
+                        RemoveOwnedPaths(inspection.Manifest.ownedPaths);
+                    }
+                    catch
+                    {
+                    }
                 }
 
-                if (!String.IsNullOrEmpty(backupRoot))
+                if (removalStarted && !String.IsNullOrEmpty(backupRoot))
                 {
                     RestoreOwnedPathsFromBackup(backupRoot);
                 }
@@ -714,8 +721,13 @@ namespace StrandedDeepModManager
             if (persistence != null && persistence.backupBeforeUpdate)
             {
                 string config = Path.Combine(GameRoot, "BepInEx", "config");
-                if (Directory.Exists(config))
-                    CopyDirectory(config, Path.Combine(backupRoot, "BepInEx-config"));
+                if ((persistence.usesBepInExConfig || persistence.usesSidecarData) &&
+                    Directory.Exists(config))
+                {
+                    CopyDirectoryLongPathSafe(
+                        config,
+                        Path.Combine(backupRoot, "BepInEx-config"));
+                }
 
                 string saveData = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -725,8 +737,12 @@ namespace StrandedDeepModManager
                     "Stranded Deep",
                     "Data");
 
-                if (Directory.Exists(saveData))
-                    CopyDirectory(saveData, Path.Combine(backupRoot, "Save-Data"));
+                if (persistence.usesGameSave && Directory.Exists(saveData))
+                {
+                    CopyDirectoryLongPathSafe(
+                        saveData,
+                        Path.Combine(backupRoot, "Save-Data"));
+                }
             }
 
             return backupRoot;
@@ -1203,6 +1219,52 @@ namespace StrandedDeepModManager
                     sb.Append(b.ToString("x2", CultureInfo.InvariantCulture));
 
                 return sb.ToString();
+            }
+        }
+
+        private static void CopyDirectoryLongPathSafe(string source, string destination)
+        {
+            if (!Directory.Exists(source))
+                return;
+
+            Directory.CreateDirectory(destination);
+
+            string systemDirectory =
+                Environment.GetFolderPath(Environment.SpecialFolder.System);
+
+            string robocopy = Path.Combine(systemDirectory, "robocopy.exe");
+
+            if (!File.Exists(robocopy))
+                throw new InvalidOperationException("robocopy.exe is required for persistent-data backup.");
+
+            if (source.IndexOf('"') >= 0 || destination.IndexOf('"') >= 0)
+                throw new InvalidOperationException("Unsafe quote character in backup path.");
+
+            System.Diagnostics.ProcessStartInfo start =
+                new System.Diagnostics.ProcessStartInfo();
+
+            start.FileName = robocopy;
+            start.Arguments =
+                "\"" + source + "\" \"" + destination + "\"" +
+                " /E /COPY:DAT /DCOPY:T /R:1 /W:1 /XJ /NFL /NDL /NJH /NJS /NP";
+            start.UseShellExecute = false;
+            start.CreateNoWindow = true;
+
+            using (System.Diagnostics.Process process =
+                System.Diagnostics.Process.Start(start))
+            {
+                if (process == null)
+                    throw new InvalidOperationException("Failed to start robocopy.exe.");
+
+                process.WaitForExit();
+
+                // Robocopy exit codes 0..7 are success / success-with-differences.
+                if (process.ExitCode > 7)
+                {
+                    throw new IOException(
+                        "Persistent-data backup failed. robocopy exit code " +
+                        process.ExitCode.ToString(CultureInfo.InvariantCulture) + ".");
+                }
             }
         }
 
